@@ -1,0 +1,25 @@
+{
+  "groups": [
+    { "id": "desktop", "cooldownMonths": 3, "utcOffsetMinutes": 480 },
+    { "id": "studio", "cooldownMonths": 1, "utcOffsetMinutes": 0 }
+  ],
+  "products": [
+    { "id": "sample-tool", "name": "Sample Tool", "groupId": "desktop" },
+    { "id": "sample-addon", "name": "Sample Add-on", "groupId": "desktop" },
+    { "id": "sample-studio", "name": "Sample Studio", "groupId": "studio" }
+  ],
+  "editions": [
+    { "id": "tool-1", "productId": "sample-tool", "name": "Tool 1" },
+    { "id": "tool-2", "productId": "sample-tool", "name": "Tool 2" },
+    { "id": "addon-1", "productId": "sample-addon", "name": "Add-on 1" },
+    { "id": "studio-1", "productId": "sample-studio", "name": "Studio 1" }
+  ],
+  "offers": [
+    { "id": "buy-tool-1", "kind": "edition", "editionId": "tool-1", "amount": 5000, "currency": "CNY" },
+    { "id": "buy-tool-2", "kind": "edition", "editionId": "tool-2", "amount": 8000, "currency": "CNY" },
+    { "id": "upgrade-tool-1-to-2", "kind": "upgrade", "editionId": "tool-2", "requiresEditionId": "tool-1", "amount": 3000, "currency": "CNY" },
+    { "id": "buy-addon-1", "kind": "edition", "editionId": "addon-1", "amount": 2000, "currency": "CNY" },
+    { "id": "buy-studio-1", "kind": "edition", "editionId": "studio-1", "amount": 9000, "currency": "CNY" },
+    { "id": "desktop-rebind", "kind": "rebind", "groupId": "desktop", "credits": 1, "amount": 1000, "currency": "CNY" }
+  ]
+}

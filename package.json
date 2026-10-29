@@ -1,0 +1,32 @@
+{
+  "name": "product-license-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Composable product licensing, device binding and distribution framework",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "engines": { "node": ">=24.19.0 <25" },
+  "packageManager": "pnpm@11.25.0",
+  "exports": {
+    ".": "./dist/index.js",
+    "./sdk": "./dist/sdk/client.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js",
+    "check": "pnpm build && pnpm test",
+    "init:local": "node dist/cli/init.js",
+    "start": "node --env-file=.env dist/main.js",
+    "demo": "node examples/demo.mjs",
+    "audit:source": "node scripts/check-public-files.mjs"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "11.2.1",
+    "fastify": "5.12.7",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}
