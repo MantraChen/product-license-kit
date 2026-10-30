@@ -69,3 +69,9 @@
 0.2.0 的 `importEntitlement`、`hasReleaseAccess` 和 `bestUpgradeOffer` 是受控宿主服务方法，没有新增用户自报证据的公开 HTTP 路由。用户 profile 的历史授权 `order_id` 可以为空，并返回按版本保存的 `channels`；消费者不能假设所有权益都来自订单。
 
 完整请求示例见 `examples/demo.mjs`，覆盖真实本地 HTTP 请求和客户端验签。各时间字段除签名许可证的 `iat/nbf/exp` 为 Unix 秒之外，均为 Unix 毫秒。
+
+## 设备自助重置
+
+`GET /v1/devices/:groupId/reset` 需要用户 Bearer 会话，返回 state、generation、freeAt、credits、cost、canReset；预览不扣额度。`POST` 同一路径需要 `{generation, cost, confirm:true}` 和 Idempotency-Key；cost 为 free 或 credit。仅能操作当前登录账号的设备组。状态、代次或费用变化会拒绝确认。
+
+`deviceResetStatus` 与 `resetDevice` 也可由可信宿主直接调用。成功重置停止旧设备续期，作废旧挑战，消费免费机会或一次额度并开始新的自然月冷却。后续一次激活返回 cost=reset，不再扣费、不重新延长冷却。绑定 profile 增加 reset_pending 字段。已签发许可证保持原到期时间，不能远程撤销离线副本。

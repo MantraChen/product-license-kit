@@ -200,7 +200,7 @@ export class Framework {
     return {
       account, entitlements: this.store.all('SELECT edition_id,active,order_id FROM entitlements WHERE account_id=?', accountId),
       channels: this.store.all("SELECT c.edition_id,c.channel FROM entitlement_channels c JOIN entitlements e ON e.account_id=c.account_id AND e.edition_id=c.edition_id WHERE c.account_id=? AND e.active=1", accountId),
-      bindings: this.store.all('SELECT group_id,device_id,key_thumbprint,bound_at,free_at,generation,enabled FROM bindings WHERE account_id=?', accountId),
+      bindings: this.store.all('SELECT b.group_id,b.device_id,b.key_thumbprint,b.bound_at,b.free_at,b.generation,b.enabled, EXISTS(SELECT 1 FROM binding_resets r WHERE r.account_id=b.account_id AND r.group_id=b.group_id AND r.generation=b.generation) AS reset_pending FROM bindings b WHERE b.account_id=?', accountId),
       credits: this.store.all('SELECT group_id,balance FROM credits WHERE account_id=?', accountId),
     };
   }
@@ -327,6 +327,42 @@ export class Framework {
       this.event('entitlement.revoked', accountId);
     });
   }
+  /** Preview never spends a credit; callers must confirm the observed generation and cost. */
+  deviceResetStatus(accountId: string, groupId: string) {
+    this.assertAccountActive(accountId);
+    requireThat(this.catalog.groups.some(g => g.id === groupId), 'GROUP_NOT_FOUND', 404);
+    const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE account_id=? AND group_id=?', accountId, groupId);
+    const pending = binding && !!this.store.get('SELECT 1 FROM binding_resets WHERE account_id=? AND group_id=? AND generation=?', accountId, groupId, binding.generation);
+    const credits = this.credits(accountId, groupId);
+    const cost = !binding || pending || !this.ownsGroup(accountId, groupId) ? null :
+      binding.free_at <= this.now() ? 'free' as const : credits > 0 ? 'credit' as const : null;
+    return { state: pending ? 'reset-pending' as const : binding ? 'bound' as const : 'unbound' as const,
+      generation: binding?.generation ?? null, freeAt: binding?.free_at ?? null, credits, cost,
+      canReset: cost !== null };
+  }
+  resetDevice(accountId: string, groupId: string, expectedGeneration: number, expectedCost: 'free' | 'credit', key: string) {
+    requireThat(Number.isSafeInteger(expectedGeneration) && expectedGeneration > 0 && ['free', 'credit'].includes(expectedCost), 'INVALID_RESET_REQUEST');
+    return this.command(accountId, 'device.reset', key, { groupId, expectedGeneration, expectedCost }, () => {
+      requireThat(this.ownsGroup(accountId, groupId), 'GROUP_NOT_OWNED', 403);
+      const state = this.deviceResetStatus(accountId, groupId);
+      requireThat(state.state === 'bound' && state.generation === expectedGeneration, 'DEVICE_BINDING_CHANGED', 409);
+      requireThat(state.cost, 'REBIND_COOLDOWN', 409);
+      requireThat(state.cost === expectedCost, 'DEVICE_RESET_COST_CHANGED', 409);
+      const group = this.catalog.groups.find(g => g.id === groupId)!;
+      const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE account_id=? AND group_id=?', accountId, groupId)!;
+      const generation = binding.generation + 1;
+      const freeAt = addCalendarMonths(this.now(), group.cooldownMonths, group.utcOffsetMinutes);
+      if (state.cost === 'credit') this.store.run('UPDATE credits SET balance=balance-1 WHERE account_id=? AND group_id=?', accountId, groupId);
+      this.store.run('UPDATE bindings SET enabled=0,generation=?,free_at=? WHERE account_id=? AND group_id=?', generation, freeAt, accountId, groupId);
+      this.store.run('INSERT INTO binding_resets VALUES(?,?,?,?)', accountId, groupId, generation, this.now());
+      this.store.run(`UPDATE challenges SET used_at=? WHERE account_id=? AND used_at IS NULL AND
+        ((kind='enroll' AND json_extract(payload,'$.groupId')=?) OR (kind='license' AND json_extract(payload,'$.deviceId')=?))`,
+        this.now(), accountId, groupId, binding.device_id);
+      this.audit(accountId, 'device.reset', binding.device_id, { groupId, cost: state.cost, generation, freeAt });
+      this.event('device.reset', accountId);
+      return { groupId, generation, freeAt, cost: state.cost, credits: this.credits(accountId, groupId) };
+    });
+  }
   private challenge(accountId: string, kind: string, payload: object) {
     this.assertAccountActive(accountId);
     const id = randomUUID(); const expiresAt = this.now() + 5 * 60_000;
@@ -352,11 +388,13 @@ export class Framework {
       const previous = this.store.get<Binding>('SELECT * FROM bindings WHERE account_id=? AND group_id=?', accountId, group.id);
       const keyOwner = this.store.get<Binding>('SELECT * FROM bindings WHERE group_id=? AND key_thumbprint=?', group.id, payload.thumbprint);
       requireThat(!keyOwner || keyOwner.account_id === accountId, 'DEVICE_KEY_ALREADY_BOUND', 409);
-      let cost: 'initial' | 'same-device' | 'free' | 'credit' = 'initial';
+      let cost: 'initial' | 'same-device' | 'free' | 'credit' | 'reset' = 'initial';
       let deviceId: string = randomUUID(); let generation = 1; let freeAt = addCalendarMonths(this.now(), group.cooldownMonths, group.utcOffsetMinutes);
       if (previous) {
         generation = previous.generation + 1;
-        if (previous.key_thumbprint === payload.thumbprint) {
+        if (this.store.get('SELECT 1 FROM binding_resets WHERE account_id=? AND group_id=? AND generation=?', accountId, group.id, previous.generation)) {
+          cost = 'reset'; freeAt = previous.free_at;
+        } else if (previous.key_thumbprint === payload.thumbprint) {
           cost = 'same-device'; deviceId = previous.device_id; freeAt = previous.free_at;
           generation = previous.enabled ? previous.generation : generation;
         } else cost = rebindCost(previous.free_at, this.now(), this.credits(accountId, group.id));
@@ -368,6 +406,7 @@ export class Framework {
         key_thumbprint=excluded.key_thumbprint,fingerprint_json=excluded.fingerprint_json,bound_at=excluded.bound_at,
         free_at=excluded.free_at,generation=excluded.generation,enabled=1`, accountId, group.id, deviceId,
         payload.publicKey, payload.thumbprint, JSON.stringify(payload.fingerprint), boundAt, freeAt, generation);
+      this.store.run('DELETE FROM binding_resets WHERE account_id=? AND group_id=?', accountId, group.id);
       this.store.run('UPDATE challenges SET used_at=? WHERE id=?', this.now(), challengeId);
       this.audit(accountId, 'device.activated', deviceId, { groupId: group.id, cost, generation, freeAt, previousDevice: previous?.device_id ?? null });
       this.event('device.activated', accountId);

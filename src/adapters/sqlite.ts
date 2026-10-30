@@ -97,6 +97,14 @@ export class SqliteStore {
           FOREIGN KEY(account_id,edition_id) REFERENCES entitlements(account_id,edition_id));
         INSERT INTO plk_migrations VALUES(3, CAST(strftime('%s','now') AS INTEGER)*1000);`);
     });
+    this.transaction(() => {
+      if (this.get('SELECT 1 FROM plk_migrations WHERE version=4')) return;
+      this.db.exec(`CREATE TABLE binding_resets (
+        account_id TEXT NOT NULL, group_id TEXT NOT NULL, generation INTEGER NOT NULL, reset_at INTEGER NOT NULL,
+        PRIMARY KEY(account_id,group_id),
+        FOREIGN KEY(account_id,group_id) REFERENCES bindings(account_id,group_id) ON DELETE CASCADE);
+        INSERT INTO plk_migrations VALUES(4, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;
