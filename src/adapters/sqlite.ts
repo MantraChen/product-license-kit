@@ -1,7 +1,21 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { privateDirectory, protectPrivatePath } from '../security/private-storage.js';
+
+/** Snapshot an existing database without running application migrations first. */
+export function backupDatabase(source: string, destination: string): void {
+  const path = resolve(destination);
+  if (existsSync(path)) throw new Error('BACKUP_ALREADY_EXISTS');
+  privateDirectory(dirname(path));
+  const database = new DatabaseSync(resolve(source), { readOnly: true });
+  try { database.prepare('VACUUM INTO ?').run(path); } finally { database.close(); }
+  protectPrivatePath(path);
+}
 
 export class SqliteStore {
   private readonly db: DatabaseSync;
+  private depth = 0;
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
@@ -56,6 +70,13 @@ export class SqliteStore {
       CREATE INDEX IF NOT EXISTS challenges_expiry ON challenges(expires_at);
       CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(delivered_at, created_at);
     `);
+    // Additive migration: preserve the v1 accounts layout used by integrations.
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS plk_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS account_states(account_id TEXT PRIMARY KEY REFERENCES accounts(id),
+          active INTEGER NOT NULL CHECK(active IN (0,1)), reason TEXT NOT NULL, updated_at INTEGER NOT NULL);
+        INSERT OR IGNORE INTO plk_migrations VALUES(2, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;
@@ -64,9 +85,29 @@ export class SqliteStore {
   run(sql: string, ...params: SQLInputValue[]): void { this.db.prepare(sql).run(...params); }
   /** Synchronous callback only. No network IO inside the write transaction. */
   transaction<T>(work: () => T): T {
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = work(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    const level = this.depth++;
+    const savepoint = `plk_${level}`;
+    try {
+      this.db.exec(level === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
+      try {
+        const result = work();
+        if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('ASYNC_TRANSACTION_NOT_SUPPORTED');
+        this.db.exec(level === 0 ? 'COMMIT' : `RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+      } catch (error) {
+        if (level === 0) this.db.exec('ROLLBACK');
+        else this.db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}; RELEASE SAVEPOINT ${savepoint}`);
+        throw error;
+      }
+    } finally { this.depth--; }
+  }
+  /** Consistent SQLite snapshot, including committed WAL data; never overwrite. */
+  backup(destination: string): void {
+    const path = resolve(destination);
+    if (existsSync(path)) throw new Error('BACKUP_ALREADY_EXISTS');
+    privateDirectory(dirname(path));
+    this.db.prepare('VACUUM INTO ?').run(path);
+    protectPrivatePath(path);
   }
   close(): void { this.db.close(); }
 }

@@ -1,7 +1,14 @@
 export { Framework, type FrameworkOptions, type Fingerprint } from './service.js';
-export { SqliteStore } from './adapters/sqlite.js';
+export { SqliteStore, backupDatabase } from './adapters/sqlite.js';
 export { KookIdentityProvider, KookNotificationSink } from './adapters/kook.js';
 export { EnvelopeSigner, sha256 } from './core/crypto.js';
 export { DomainError, parseCatalog, addCalendarMonths, rebindCost } from './core/model.js';
 export type { Catalog, IdentityProvider, VerifiedIdentity, Notification, NotificationSink } from './core/model.js';
 export { createApp } from './http/app.js';
+export { guardBrowserRequest, type BrowserPolicy } from './security/browser.js';
+export { privateDirectory, protectPrivatePath, writePrivateAtomic } from './security/private-storage.js';
+export { hashPassword } from './security/password.js';
+export { trustedProxies } from './security/proxy.js';
+export { encryptBackup, decryptBackup, restoreBackup } from './security/backup.js';
+export { rotateSigningKey } from './security/signing-rotation.js';
+export { assertServiceStopped, acquireServiceLock } from './security/process-lock.js';

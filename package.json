@@ -1,6 +1,6 @@
 {
   "name": "product-license-kit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Composable product licensing, device binding and distribution framework",
@@ -16,6 +16,8 @@
     "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js",
     "check": "pnpm build && pnpm test",
     "init:local": "node dist/cli/init.js",
+    "security:protect-local": "node dist/cli/protect-local.js",
+    "maintenance": "node --env-file=.env dist/cli/maintenance.js",
     "start": "node --env-file=.env dist/main.js",
     "demo": "node examples/demo.mjs",
     "audit:source": "node scripts/check-public-files.mjs"
