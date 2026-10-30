@@ -24,6 +24,8 @@
 
 0.1.1 增加 `plk_migrations` 第 2 版与 `account_states` 表，保留旧 `accounts` 列布局和既有数据；重复启动不会重复迁移。升级前先备份；后续 schema 变更继续使用显式迁移，禁止删库重建生产数据。
 
+0.2.0 的迁移 3 将 `entitlements.order_id` 改为可空，并增加 `entitlement_imports` 与 `entitlement_channels`；保留原有付款授权和订单。升级后核对来源、渠道和既有权益。降级必须恢复与旧代码匹配的备份，不能仅回退可执行文件。
+
 ## 备份与恢复
 
 从 0.1.1 开始，已有本地环境运行 `pnpm security:protect-local` 收紧仓库、`.env`、`.data` 的权限。Windows 保留当前身份、SYSTEM、Administrators，Unix 目录 0700 / 私有文件 0600。以实际服务身份执行；不要对共享驱动根目录运行。自定义数据目录可调用 `privateDirectory` / `protectPrivatePath`。已单独保护的子文件应递归检查。

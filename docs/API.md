@@ -54,6 +54,7 @@
 | --- | --- |
 | `POST /v1/admin/invitations` | `{provider,subject}` → 三十分钟有效的单次注册票据 |
 | `GET /v1/admin/accounts/:id` | 账号状态 |
+| `POST /v1/admin/accounts/:id/status` | `{active,reason}`；停用撤销会话、挑战与设备刷新，恢复不复活旧令牌 |
 | `POST /v1/admin/accounts/:id/identity` | `{provider,subject,reason}`；变更关联身份并撤销旧会话与设备刷新 |
 | `POST /v1/admin/accounts/:id/credits` | `{groupId,count,reason}`；需要幂等键；赠送 1–100 次 |
 | `POST /v1/admin/accounts/:id/revoke` | `{editionId,reason}`；撤销单个版本权益，不执行退款 |
@@ -64,5 +65,7 @@
 | `GET /v1/admin/audit` | 最近 100 条审计记录 |
 
 管理 API 是受控后端集成接口。没有独立操作员账号、MFA 或完整可视化后台；当前审计管理员统一记为 `admin`。正式运营应在上层实现有具体身份的授权代理，不让多人共享根密钥。
+
+0.2.0 的 `importEntitlement`、`hasReleaseAccess` 和 `bestUpgradeOffer` 是受控宿主服务方法，没有新增用户自报证据的公开 HTTP 路由。用户 profile 的历史授权 `order_id` 可以为空，并返回按版本保存的 `channels`；消费者不能假设所有权益都来自订单。
 
 完整请求示例见 `examples/demo.mjs`，覆盖真实本地 HTTP 请求和客户端验签。各时间字段除签名许可证的 `iat/nbf/exp` 为 Unix 秒之外，均为 Unix 毫秒。
