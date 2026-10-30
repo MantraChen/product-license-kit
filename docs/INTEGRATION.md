@@ -56,7 +56,7 @@ API 当前不接受文件上传、不执行用户命令、不生成下载 URL。
 ## 替换数据库
 
 SQLite 使用 WAL、外键和显式写事务，适合单节点。业务服务当前直接使用同步 SQLite 存储接口；PostgreSQL 接入需要引入异步仓储与迁移，保持事务、唯一约束和幂等语义，并运行并发集成测试。不要在网络共享目录放 SQLite，也不要假设多个服务副本的限流与 outbox 已协调。
-# 0.1.1 安全集成补充
+## 安全集成能力
 
 `FrameworkOptions.accountEnabled(accountId)` 可同步查询产品账号状态，必须显式返回 `true` 才允许；它会在核心授权、设备激活、订单与分发路径中校验，不能只在 HTTP 路由补一处检查。框架内置状态通过 `setAccountActive(id, active, reason)` 更新；停用会撤销会话、挑战与设备，恢复不会复活旧令牌，也不删除永久权益。产品的额外会话应在同一个 `store.transaction` 中撤销，嵌套核心事务由 savepoint 保证整体回滚。
 
