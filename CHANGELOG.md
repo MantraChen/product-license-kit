@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 — 2026-10-30
+
+- Enforce persistent account suspension and an optional fail-closed product account policy inside authorization, activation and distribution operations, including idempotent replays.
+- Add additive migration records, nested transactions for atomic product integration, and revocation of sessions, challenges and device bindings on suspension.
+- Provide a router-metadata-based browser CSRF guard and bounded scrypt hashing for web integrations.
+- Protect service data with Windows DACLs / Unix private modes before initialization; support atomic private file replacement and single-process service locks.
+- Add consistent SQLite snapshots, authenticated encrypted recovery bundles, restore-to-new-directory and signing-key rotation tools.
+- Configure explicit trusted proxy CIDRs while rejecting implicit or global trust.
+- Add security regression, migration and backup/recovery tests. This does not implement hardware attestation or eliminate the documented offline lease window.
+
 ## 0.1.0 — 2026-10-30
 
 - Initial source-available framework under PolyForm Noncommercial 1.0.0 with explicit PR contribution terms.

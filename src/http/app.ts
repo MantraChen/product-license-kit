@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DomainError, requireThat } from '../core/model.js';
 import { secretEqual } from '../core/crypto.js';
 import type { Framework } from '../service.js';
+import { trustedProxies } from '../security/proxy.js';
 
 const id = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/);
 const subject = z.string().min(1).max(128);
@@ -18,11 +19,11 @@ const bearer = (request: FastifyRequest): string => {
   requireThat(match?.[1], 'UNAUTHORIZED', 401); return match[1];
 };
 
-export async function createApp(framework: Framework, options: { adminToken: string; logger?: boolean; rateLimitMax?: number }) {
+export async function createApp(framework: Framework, options: { adminToken: string; logger?: boolean; rateLimitMax?: number; trustedProxyCidrs?: string }) {
   requireThat(options.adminToken.length >= 32 && !options.adminToken.startsWith('replace-'), 'INVALID_ADMIN_TOKEN');
   const app = Fastify({
     logger: options.logger ? { redact: ['req.headers.authorization', 'req.headers.cookie'] } : false,
-    bodyLimit: 16 * 1024, trustProxy: false, requestTimeout: 15_000,
+    bodyLimit: 16 * 1024, trustProxy: trustedProxies(options.trustedProxyCidrs), requestTimeout: 15_000,
   });
   await app.register(rateLimit, { global: true, max: options.rateLimitMax ?? 120, timeWindow: '1 minute' });
   app.addHook('onRequest', async (request, reply) => {
@@ -46,7 +47,7 @@ export async function createApp(framework: Framework, options: { adminToken: str
   const commandKey = (request: FastifyRequest) => keySchema.parse(request.headers['idempotency-key']);
   const authRate = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
-  app.get('/health', async () => ({ status: 'ok', framework: 'product-license-kit', version: '0.1.0' }));
+  app.get('/health', async () => ({ status: 'ok', framework: 'product-license-kit', version: '0.1.1' }));
   app.get('/v1/catalog', async () => framework.catalog);
   app.get('/v1/signing-key', async () => ({ kid: framework.signer.kid, publicKey: framework.signer.publicKey, issuer: framework.issuer }));
   app.post('/v1/auth/register', authRate, async request => {
@@ -93,6 +94,10 @@ export async function createApp(framework: Framework, options: { adminToken: str
       return framework.issueInvitation(body.provider, body.subject);
     });
     protectedApp.get('/accounts/:id', async request => framework.profile(paramsId(request)));
+    protectedApp.post('/accounts/:id/status', async request => {
+      const body = z.object({ active: z.boolean(), reason }).strict().parse(request.body);
+      framework.setAccountActive(paramsId(request), body.active, body.reason); return { ok: true };
+    });
     protectedApp.post('/accounts/:id/identity', async request => {
       const body = z.object({ provider: id, subject, reason }).strict().parse(request.body);
       framework.changeIdentity(paramsId(request), body.provider, body.subject, body.reason); return { ok: true };

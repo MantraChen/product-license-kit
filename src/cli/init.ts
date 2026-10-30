@@ -1,10 +1,12 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
 import { randomToken } from '../core/crypto.js';
 import { requireThat } from '../core/model.js';
+import { privateDirectory, protectPrivatePath } from '../security/private-storage.js';
 
 requireThat(!existsSync('.env') && !existsSync('.data/signing.pem') && !existsSync('.data/local-identities.json'), 'LOCAL_CONFIG_ALREADY_EXISTS');
-mkdirSync('.data', { recursive: true });
+protectPrivatePath('.');
+privateDirectory('.data');
 const keys = generateKeyPairSync('ed25519');
 writeFileSync('.data/signing.pem', keys.privateKey.export({ type: 'pkcs8', format: 'pem' }), { flag: 'wx', mode: 0o600 });
 writeFileSync('.data/signing-public.pem', keys.publicKey.export({ type: 'spki', format: 'pem' }), { flag: 'wx' });

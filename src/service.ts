@@ -26,6 +26,8 @@ export interface Fingerprint { schema: string; digest: string }
 export interface FrameworkOptions {
   store: SqliteStore; catalog: Catalog; signer: EnvelopeSigner;
   providers: IdentityProvider[]; issuer: string; now?: () => number; licenseSeconds?: number;
+  /** Synchronous, fail-closed product policy (for example an application's credential status). */
+  accountEnabled?: (accountId: string) => boolean;
 }
 
 export class Framework {
@@ -36,12 +38,14 @@ export class Framework {
   readonly issuer: string;
   readonly now: () => number;
   readonly licenseSeconds: number;
+  private readonly accountEnabled: (accountId: string) => boolean;
   constructor(options: FrameworkOptions) {
     this.store = options.store; this.catalog = options.catalog; this.signer = options.signer;
     this.providers = new Map(options.providers.map(p => [p.name, p]));
     requireThat(this.providers.size === options.providers.length, 'DUPLICATE_IDENTITY_PROVIDER');
     this.issuer = options.issuer; this.now = options.now ?? Date.now;
     this.licenseSeconds = options.licenseSeconds ?? 900;
+    this.accountEnabled = options.accountEnabled ?? (() => true);
     requireThat(Number.isInteger(this.licenseSeconds) && this.licenseSeconds >= 30 && this.licenseSeconds <= 86400, 'INVALID_LEASE_DURATION');
     for (const row of this.store.all<{ edition_id: string }>('SELECT DISTINCT edition_id FROM entitlements')) {
       requireThat(this.catalog.editions.some(e => e.id === row.edition_id), 'CATALOG_REMOVES_EXISTING_ENTITLEMENT');
@@ -59,6 +63,30 @@ export class Framework {
   private account(id: string): Account {
     const account = this.store.get<Account>('SELECT * FROM accounts WHERE id=?', id);
     requireThat(account, 'ACCOUNT_NOT_FOUND', 404); return account;
+  }
+  isAccountActive(accountId: string): boolean {
+    return !!this.store.get('SELECT 1 FROM accounts WHERE id=?', accountId) &&
+      this.store.get<{ active: number }>('SELECT active FROM account_states WHERE account_id=?', accountId)?.active !== 0 &&
+      this.accountEnabled(accountId) === true;
+  }
+  assertAccountActive(accountId: string): void {
+    requireThat(this.isAccountActive(accountId), 'ACCOUNT_DISABLED', 403);
+  }
+  setAccountActive(accountId: string, active: boolean, reason: string): void {
+    requireThat(typeof active === 'boolean' && reason.trim().length >= 3 && reason.length <= 500, 'INVALID_ACCOUNT_STATUS');
+    this.store.transaction(() => {
+      this.account(accountId);
+      this.store.run(`INSERT INTO account_states VALUES(?,?,?,?) ON CONFLICT(account_id)
+        DO UPDATE SET active=excluded.active,reason=excluded.reason,updated_at=excluded.updated_at`,
+      accountId, active ? 1 : 0, reason, this.now());
+      if (!active) {
+        this.store.run('DELETE FROM sessions WHERE account_id=?', accountId);
+        this.store.run('UPDATE challenges SET used_at=? WHERE account_id=? AND used_at IS NULL', this.now(), accountId);
+        this.store.run('UPDATE bindings SET enabled=0,generation=generation+1 WHERE account_id=? AND enabled=1', accountId);
+      }
+      this.audit('admin', active ? 'account.enabled' : 'account.disabled', accountId, { reason });
+      this.event(active ? 'account.enabled' : 'account.disabled', accountId);
+    });
   }
   private owns(accountId: string, editionId: string): boolean {
     return !!this.store.get('SELECT 1 FROM entitlements WHERE account_id=? AND edition_id=? AND active=1', accountId, editionId);
@@ -83,6 +111,7 @@ export class Framework {
   private command<T>(accountId: string, operation: string, key: string, input: unknown, work: () => T): T {
     requireThat(/^[A-Za-z0-9_-]{16,128}$/.test(key), 'INVALID_IDEMPOTENCY_KEY');
     return this.store.transaction(() => {
+      this.assertAccountActive(accountId);
       const hash = sha256(JSON.stringify(input));
       const prior = this.store.get<{ request_hash: string; result_json: string }>(
         'SELECT * FROM commands WHERE account_id=? AND operation=? AND command_key=?', accountId, operation, key);
@@ -114,6 +143,7 @@ export class Framework {
     return identity;
   }
   private session(accountId: string): { accessToken: string; expiresAt: number; accountId: string } {
+    this.assertAccountActive(accountId);
     const accessToken = randomToken(); const expiresAt = this.now() + 12 * 60 * 60_000;
     this.store.run('INSERT INTO sessions VALUES (?,?,?)', sha256(accessToken), accountId, expiresAt);
     return { accessToken, expiresAt, accountId };
@@ -139,12 +169,14 @@ export class Framework {
     return this.store.transaction(() => {
       const account = this.store.get<Account>('SELECT * FROM accounts WHERE provider=? AND subject=?', identity.provider, identity.subject);
       requireThat(account, 'IDENTITY_NOT_REGISTERED', 401);
+      this.assertAccountActive(account.id);
       this.audit(account.id, 'session.created', account.id); return this.session(account.id);
     });
   }
   authenticate(token: string): string {
     const session = this.store.get<{ account_id: string; expires_at: number }>('SELECT * FROM sessions WHERE hash=?', sha256(token));
-    requireThat(session && session.expires_at > this.now(), 'UNAUTHORIZED', 401); return session.account_id;
+    requireThat(session && session.expires_at > this.now(), 'UNAUTHORIZED', 401);
+    this.assertAccountActive(session.account_id); return session.account_id;
   }
   logout(token: string): void { this.store.run('DELETE FROM sessions WHERE hash=?', sha256(token)); }
   changeIdentity(accountId: string, provider: string, subject: string, reason: string): void {
@@ -184,6 +216,7 @@ export class Framework {
     });
   }
   private checkOfferEligibility(accountId: string, offer: Offer): void {
+    this.assertAccountActive(accountId);
     if (offer.kind === 'rebind') requireThat(this.ownsGroup(accountId, offer.groupId!), 'GROUP_NOT_OWNED', 403);
     else {
       requireThat(!this.owns(accountId, offer.editionId!), 'EDITION_ALREADY_OWNED', 409);
@@ -191,6 +224,7 @@ export class Framework {
     }
   }
   orders(accountId: string) {
+    this.assertAccountActive(accountId);
     return this.store.all<Order>('SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100', accountId)
       .map(row => ({ id: row.id, offer: JSON.parse(row.offer_json) as Offer, status: row.status, createdAt: row.created_at, paidAt: row.paid_at }));
   }
@@ -219,6 +253,7 @@ export class Framework {
   }
   cancelOrder(accountId: string, orderId: string): void {
     this.store.transaction(() => {
+      this.assertAccountActive(accountId);
       const row = this.store.get<Order>('SELECT * FROM orders WHERE id=? AND account_id=?', orderId, accountId);
       requireThat(row, 'ORDER_NOT_FOUND', 404); requireThat(row.status === 'pending', 'ORDER_NOT_PENDING', 409);
       this.store.run("UPDATE orders SET status='cancelled' WHERE id=?", orderId);
@@ -243,12 +278,14 @@ export class Framework {
     });
   }
   private challenge(accountId: string, kind: string, payload: object) {
+    this.assertAccountActive(accountId);
     const id = randomUUID(); const expiresAt = this.now() + 5 * 60_000;
     const message = JSON.stringify(['product-license-kit', 1, kind, id, accountId, payload, randomToken()]);
     this.store.run('INSERT INTO challenges VALUES (?,?,?,?,?,?,NULL)', id, accountId, kind, JSON.stringify(payload), message, expiresAt);
     return { challengeId: id, message, expiresAt };
   }
   enrollmentChallenge(accountId: string, groupId: string, publicKey: string, fingerprint: Fingerprint) {
+    this.assertAccountActive(accountId);
     requireThat(this.ownsGroup(accountId, groupId), 'GROUP_NOT_OWNED', 403);
     let normalized: ReturnType<typeof normalizePublicKey>;
     try { normalized = normalizePublicKey(publicKey); } catch { requireThat(false, 'INVALID_DEVICE_KEY'); }
@@ -294,12 +331,14 @@ export class Framework {
   licenseChallenge(deviceId: string, editionId: string) {
     const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE device_id=? AND enabled=1', deviceId);
     requireThat(binding && this.owns(binding.account_id, editionId), 'LICENSE_UNAVAILABLE', 403);
+    this.assertAccountActive(binding.account_id);
     requireThat(this.groupForEdition(editionId).groupId === binding.group_id, 'LICENSE_UNAVAILABLE', 403);
     return this.challenge(binding.account_id, 'license', { deviceId, editionId, generation: binding.generation });
   }
   issueLicense(challengeId: string, signature: string) {
     return this.store.transaction(() => {
       const challenge = this.loadChallenge(challengeId, 'license');
+      this.assertAccountActive(challenge.account_id);
       const payload = JSON.parse(challenge.payload) as { deviceId: string; editionId: string; generation: number };
       const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE device_id=? AND enabled=1', payload.deviceId);
       requireThat(binding && binding.account_id === challenge.account_id && binding.generation === payload.generation &&
@@ -329,6 +368,7 @@ export class Framework {
     return this.store.transaction(() => {
       const row = this.store.get<Distribution>('SELECT * FROM distributions WHERE id=?', id);
       requireThat(row, 'DISTRIBUTION_NOT_FOUND', 404);
+      this.assertAccountActive(row.account_id);
       requireThat(this.owns(row.account_id, row.edition_id), 'EDITION_NOT_OWNED', 403);
       if (row.manifest) {
         requireThat(row.artifact_sha256 === artifactSha256, 'DISTRIBUTION_IMMUTABLE', 409);
@@ -342,6 +382,7 @@ export class Framework {
     });
   }
   distributions(accountId: string) {
+    this.assertAccountActive(accountId);
     return this.store.all<Distribution>('SELECT * FROM distributions WHERE account_id=? AND finalized_at IS NOT NULL ORDER BY created_at DESC LIMIT 100', accountId)
       .filter(row => this.owns(accountId, row.edition_id))
       .map(row => ({ id: row.id, editionId: row.edition_id, releaseId: row.release_id, manifest: row.manifest, sha256: row.artifact_sha256 }));
