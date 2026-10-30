@@ -66,6 +66,15 @@ export async function createApp(framework: Framework, options: { adminToken: str
     return framework.createOrder(accountId, body.offerId, commandKey(request));
   });
   app.post('/v1/orders/:id/cancel', async request => { framework.cancelOrder(user(request), paramsId(request)); return { ok: true }; });
+  app.get('/v1/devices/:groupId/reset', async request => {
+    const { groupId } = z.object({ groupId: id }).parse(request.params);
+    return framework.deviceResetStatus(user(request), groupId);
+  });
+  app.post('/v1/devices/:groupId/reset', async request => {
+    const { groupId } = z.object({ groupId: id }).parse(request.params);
+    const body = z.object({ generation: z.number().int().positive(), cost: z.enum(['free', 'credit']), confirm: z.literal(true) }).strict().parse(request.body);
+    return framework.resetDevice(user(request), groupId, body.generation, body.cost, commandKey(request));
+  });
   app.post('/v1/devices/challenges', async request => {
     const accountId = user(request);
     const body = z.object({ groupId: id, publicKey: z.string().min(32).max(2048),

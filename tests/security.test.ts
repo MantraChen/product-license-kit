@@ -183,6 +183,7 @@ test('additive migrations preserve legacy accounts and are idempotent', () => {
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM accounts')!.n, 1);
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=2')!.n, 1);
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=3')!.n, 1);
+      assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=4')!.n, 1);
       assert.equal(db.get<{order_id:string}>('SELECT order_id FROM entitlements')!.order_id, 'old-order');
       assert.equal(db.all<{name:string;notnull:number}>('PRAGMA table_info(entitlements)').find(c => c.name === 'order_id')!.notnull, 0);
       assert.equal(db.all('PRAGMA foreign_key_check').length, 0);
