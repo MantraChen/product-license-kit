@@ -1,5 +1,15 @@
 # 适配器接入
 
+## 已验证的历史授权（0.2）
+
+宿主必须先从受信平台核实账号身份与购买凭证，再调用 `importEntitlement(accountId, editionId, { source, reference, reason, betaAccess })`。这是宿主服务方法，没有公开认领 HTTP 接口，不能接受客户端自报的身份组。`reference` 使用平台身份与服务器组合的稳定摘要，同一来源、凭证、版本只能属于一个账号。识别已有授权不会覆盖其付款来源，已撤销授权不会自动恢复；重复识别幂等，退群不会撤销已确认的永久权益。
+
+`betaAccess: true` 同时确认本版本普通授权和 beta 资格；普通身份组不会获得 beta。`hasReleaseAccess(accountId, editionId, channel)` 检查账号状态、有效权益及该版本渠道资格。升级后的新版本不继承旧版 beta。产品的文件下载和客户端仍须在交付时调用渠道鉴权。
+
+`bestUpgradeOffer(accountId, targetEditionId)` 按已有有效权益选择最低固定升级价，同价按商品 ID 排序，不会混合比较不同币种。下单与付款确认仍执行原资格检查。
+
+迁移 3 保留已有订单和授权，将 `entitlements.order_id` 改为可空，并增加来源与渠道表。历史认领不生成虚假订单/付款；消费 profile 的产品应兼容空订单号。升级前备份，迁移后回退必须恢复匹配旧代码的备份，不能仅切换二进制。
+
 ## 身份与社区平台
 
 实现 `IdentityProvider`，注册到 `FrameworkOptions.providers`：

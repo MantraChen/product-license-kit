@@ -199,9 +199,59 @@ export class Framework {
     const account = this.account(accountId);
     return {
       account, entitlements: this.store.all('SELECT edition_id,active,order_id FROM entitlements WHERE account_id=?', accountId),
+      channels: this.store.all("SELECT c.edition_id,c.channel FROM entitlement_channels c JOIN entitlements e ON e.account_id=c.account_id AND e.edition_id=c.edition_id WHERE c.account_id=? AND e.active=1", accountId),
       bindings: this.store.all('SELECT group_id,device_id,key_thumbprint,bound_at,free_at,generation,enabled FROM bindings WHERE account_id=?', accountId),
       credits: this.store.all('SELECT group_id,balance FROM credits WHERE account_id=?', accountId),
     };
+  }
+  /** Trusted host only: verify the external evidence before invoking this method.
+   * Never creates a payment, overwrites paid provenance, or restores revoked rights. */
+  importEntitlement(accountId: string, editionId: string, evidence: { source: string; reference: string; reason: string; betaAccess?: boolean }) {
+    requireThat(/^[A-Za-z0-9._-]{1,80}$/.test(evidence.source) &&
+      /^[A-Za-z0-9._:-]{1,256}$/.test(evidence.reference) &&
+      evidence.reason.trim().length >= 3 && evidence.reason.length <= 500 &&
+      (evidence.betaAccess === undefined || typeof evidence.betaAccess === 'boolean'), 'INVALID_IMPORT_EVIDENCE');
+    return this.store.transaction(() => {
+      this.assertAccountActive(accountId);
+      this.groupForEdition(editionId);
+      const prior = this.store.get<{ account_id: string }>(
+        'SELECT account_id FROM entitlement_imports WHERE source=? AND reference=? AND edition_id=?',
+        evidence.source, evidence.reference, editionId);
+      requireThat(!prior || prior.account_id === accountId, 'ENTITLEMENT_IMPORT_ALREADY_CLAIMED', 409);
+      const owned = this.store.get<{ active: number }>(
+        'SELECT active FROM entitlements WHERE account_id=? AND edition_id=?', accountId, editionId);
+      if (owned?.active === 0) return { editionId, status: 'revoked' as const };
+      if (!prior) {
+        this.store.run('INSERT INTO entitlement_imports VALUES(?,?,?,?,?,?)',
+          evidence.source, evidence.reference, editionId, accountId, evidence.reason, this.now());
+        this.audit('admin', 'entitlement.imported', accountId, { editionId, ...evidence, alreadyOwned: !!owned });
+      }
+      if (!owned) {
+        this.store.run('INSERT INTO entitlements VALUES(?,?,NULL,1)', accountId, editionId);
+        this.event('entitlement.imported', accountId);
+      }
+      if (evidence.betaAccess && !this.hasReleaseAccess(accountId, editionId, 'beta')) {
+        this.store.run("INSERT INTO entitlement_channels VALUES(?,?,'beta')", accountId, editionId);
+        this.audit('admin', 'entitlement.beta-recognized', accountId, { editionId, ...evidence });
+      }
+      return { editionId, status: owned ? 'already-owned' as const : 'imported' as const };
+    });
+  }
+  hasReleaseAccess(accountId: string, editionId: string, channel: 'stable' | 'beta'): boolean {
+    return this.isAccountActive(accountId) && this.owns(accountId, editionId) &&
+      (channel === 'stable' || (channel === 'beta' && !!this.store.get(
+        "SELECT 1 FROM entitlement_channels WHERE account_id=? AND edition_id=? AND channel='beta'", accountId, editionId)));
+  }
+  bestUpgradeOffer(accountId: string, editionId: string) {
+    this.assertAccountActive(accountId);
+    this.groupForEdition(editionId);
+    requireThat(!this.owns(accountId, editionId), 'EDITION_ALREADY_OWNED', 409);
+    const candidates = this.catalog.offers.filter(o => o.kind === 'upgrade' &&
+      o.editionId === editionId && this.owns(accountId, o.requiresEditionId!));
+    requireThat(new Set(candidates.map(o => o.currency)).size <= 1, 'AMBIGUOUS_UPGRADE_CURRENCY');
+    const offer = candidates.sort((a, b) => a.amount - b.amount || a.id.localeCompare(b.id))[0];
+    requireThat(offer, 'UPGRADE_NOT_ELIGIBLE', 403);
+    return offer;
   }
   createOrder(accountId: string, offerId: string, key: string) {
     return this.command(accountId, 'order.create', key, { offerId }, () => {

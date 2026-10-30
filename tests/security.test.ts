@@ -166,6 +166,12 @@ test('additive migrations preserve legacy accounts and are idempotent', () => {
   const root = privateDirectory(mkdtempSync(join(tmpdir(), 'plk-migrate-'))), path = join(root, 'legacy.sqlite');
   const old = new DatabaseSync(path);
   old.exec("CREATE TABLE accounts(id TEXT PRIMARY KEY, provider TEXT NOT NULL,subject TEXT NOT NULL,created_at INTEGER NOT NULL,UNIQUE(provider,subject)); INSERT INTO accounts VALUES('legacy','local','legacy-person',1)");
+  old.exec(`CREATE TABLE orders(id TEXT PRIMARY KEY,account_id TEXT NOT NULL REFERENCES accounts(id),offer_json TEXT NOT NULL,
+    status TEXT NOT NULL,created_at INTEGER NOT NULL,paid_at INTEGER,payment_method TEXT,payment_reference TEXT);
+    INSERT INTO orders VALUES('old-order','legacy','{}','paid',1,1,'manual-bank','old-reference');
+    CREATE TABLE entitlements(account_id TEXT NOT NULL REFERENCES accounts(id),edition_id TEXT NOT NULL,
+      order_id TEXT NOT NULL REFERENCES orders(id),active INTEGER NOT NULL,PRIMARY KEY(account_id,edition_id));
+    INSERT INTO entitlements VALUES('legacy','tool-1','old-order',1);`);
   old.close();
   backupDatabase(path, join(root, 'before-upgrade.sqlite'));
   const untouched = new DatabaseSync(join(root, 'before-upgrade.sqlite'), {readOnly:true});
@@ -176,6 +182,9 @@ test('additive migrations preserve legacy accounts and are idempotent', () => {
     try {
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM accounts')!.n, 1);
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=2')!.n, 1);
+      assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=3')!.n, 1);
+      assert.equal(db.get<{order_id:string}>('SELECT order_id FROM entitlements')!.order_id, 'old-order');
+      assert.equal(db.all<{name:string;notnull:number}>('PRAGMA table_info(entitlements)').find(c => c.name === 'order_id')!.notnull, 0);
       assert.equal(db.all('PRAGMA foreign_key_check').length, 0);
     } finally { db.close(); }
   }
