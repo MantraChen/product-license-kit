@@ -77,6 +77,26 @@ export class SqliteStore {
           active INTEGER NOT NULL CHECK(active IN (0,1)), reason TEXT NOT NULL, updated_at INTEGER NOT NULL);
         INSERT OR IGNORE INTO plk_migrations VALUES(2, CAST(strftime('%s','now') AS INTEGER)*1000);`);
     });
+    this.transaction(() => {
+      if (this.get('SELECT 1 FROM plk_migrations WHERE version=3')) return;
+      // Imported ownership has no payment/order. Preserve existing paid provenance.
+      this.db.exec(`ALTER TABLE entitlements RENAME TO entitlements_v2;
+        CREATE TABLE entitlements (
+          account_id TEXT NOT NULL REFERENCES accounts(id), edition_id TEXT NOT NULL,
+          order_id TEXT REFERENCES orders(id), active INTEGER NOT NULL CHECK(active IN (0,1)),
+          PRIMARY KEY(account_id, edition_id));
+        INSERT INTO entitlements SELECT * FROM entitlements_v2;
+        DROP TABLE entitlements_v2;
+        CREATE TABLE entitlement_imports (
+          source TEXT NOT NULL, reference TEXT NOT NULL, edition_id TEXT NOT NULL,
+          account_id TEXT NOT NULL REFERENCES accounts(id), reason TEXT NOT NULL, created_at INTEGER NOT NULL,
+          PRIMARY KEY(source,reference,edition_id));
+        CREATE TABLE entitlement_channels (
+          account_id TEXT NOT NULL, edition_id TEXT NOT NULL, channel TEXT NOT NULL CHECK(channel='beta'),
+          PRIMARY KEY(account_id,edition_id,channel),
+          FOREIGN KEY(account_id,edition_id) REFERENCES entitlements(account_id,edition_id));
+        INSERT INTO plk_migrations VALUES(3, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;
