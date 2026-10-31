@@ -25,7 +25,7 @@ interface Distribution {
 export interface Fingerprint { schema: string; digest: string }
 export interface FrameworkOptions {
   store: SqliteStore; catalog: Catalog; signer: EnvelopeSigner;
-  providers: IdentityProvider[]; issuer: string; now?: () => number; licenseSeconds?: number;
+  providers: IdentityProvider[]; issuer: string; now?: () => number; licenseSeconds?: number; orderTtlSeconds?: number;
   /** Synchronous, fail-closed product policy (for example an application's credential status). */
   accountEnabled?: (accountId: string) => boolean;
 }
@@ -38,6 +38,7 @@ export class Framework {
   readonly issuer: string;
   readonly now: () => number;
   readonly licenseSeconds: number;
+  readonly orderTtlSeconds: number;
   private readonly accountEnabled: (accountId: string) => boolean;
   constructor(options: FrameworkOptions) {
     this.store = options.store; this.catalog = options.catalog; this.signer = options.signer;
@@ -45,6 +46,10 @@ export class Framework {
     requireThat(this.providers.size === options.providers.length, 'DUPLICATE_IDENTITY_PROVIDER');
     this.issuer = options.issuer; this.now = options.now ?? Date.now;
     this.licenseSeconds = options.licenseSeconds ?? 900;
+    this.orderTtlSeconds = options.orderTtlSeconds ?? 86400;
+    requireThat(Number.isInteger(this.orderTtlSeconds) && this.orderTtlSeconds >= 60 && this.orderTtlSeconds <= 30 * 86400, 'INVALID_ORDER_DURATION');
+    // Existing pending orders receive a full grace period on first upgrade.
+    this.store.run("INSERT OR IGNORE INTO order_deadlines SELECT id,?,NULL FROM orders WHERE status='pending'", this.now() + this.orderTtlSeconds * 1000);
     this.accountEnabled = options.accountEnabled ?? (() => true);
     requireThat(Number.isInteger(this.licenseSeconds) && this.licenseSeconds >= 30 && this.licenseSeconds <= 86400, 'INVALID_LEASE_DURATION');
     for (const row of this.store.all<{ edition_id: string }>('SELECT DISTINCT edition_id FROM entitlements')) {
@@ -261,8 +266,10 @@ export class Framework {
       const orderId = randomUUID();
       this.store.run('INSERT INTO orders(id,account_id,offer_json,status,created_at) VALUES (?,?,?,?,?)',
         orderId, accountId, JSON.stringify(offer), 'pending', this.now());
-      this.audit(accountId, 'order.created', orderId, { offerId });
-      return { orderId, status: 'pending', offer };
+      const expiresAt = this.now() + this.orderTtlSeconds * 1000;
+      this.store.run('INSERT INTO order_deadlines VALUES(?,?,NULL)', orderId, expiresAt);
+      this.audit(accountId, 'order.created', orderId, { offerId, expiresAt });
+      return { orderId, status: 'pending', offer, expiresAt };
     });
   }
   private checkOfferEligibility(accountId: string, offer: Offer): void {
@@ -276,9 +283,9 @@ export class Framework {
   orders(accountId: string) {
     this.assertAccountActive(accountId);
     return this.store.all<Order>('SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100', accountId)
-      .map(row => ({ id: row.id, offer: JSON.parse(row.offer_json) as Offer, status: row.status, createdAt: row.created_at, paidAt: row.paid_at }));
+      .map(row => ({ id: row.id, offer: JSON.parse(row.offer_json) as Offer, ...this.orderLifecycle(row.id), createdAt: row.created_at, paidAt: row.paid_at }));
   }
-  confirmPayment(orderId: string, payment: { method: string; reference: string; amount: number; currency: string }) {
+  confirmPayment(orderId: string, payment: { method: string; reference: string; amount: number; currency: string }, review?: { latePaymentReason: string }) {
     return this.store.transaction(() => {
       const order = this.store.get<Order>('SELECT * FROM orders WHERE id=?', orderId);
       requireThat(order, 'ORDER_NOT_FOUND', 404);
@@ -288,7 +295,10 @@ export class Framework {
         requireThat(order.payment_method === payment.method && order.payment_reference === payment.reference, 'PAYMENT_ALREADY_RECORDED', 409);
         return { orderId, status: 'paid', replayed: true };
       }
-      requireThat(order.status === 'pending', 'ORDER_NOT_PENDING', 409);
+      const lifecycle = this.orderLifecycle(orderId);
+      if (lifecycle.status === 'expired') {
+        requireThat(review && review.latePaymentReason.trim().length >= 3 && review.latePaymentReason.length <= 500, 'LATE_PAYMENT_REVIEW_REQUIRED', 409);
+      } else requireThat(order.status === 'pending', 'ORDER_NOT_PENDING', 409);
       requireThat(!this.store.get('SELECT 1 FROM orders WHERE payment_method=? AND payment_reference=?', payment.method, payment.reference), 'PAYMENT_REFERENCE_REUSED', 409);
       this.checkOfferEligibility(order.account_id, offer);
       if (offer.kind === 'rebind') this.addCredits(order.account_id, offer.groupId!, offer.credits!);
@@ -296,16 +306,35 @@ export class Framework {
         DO UPDATE SET active=1,order_id=excluded.order_id`, order.account_id, offer.editionId!, orderId);
       this.store.run('UPDATE orders SET status=?,paid_at=?,payment_method=?,payment_reference=? WHERE id=?',
         'paid', this.now(), payment.method, payment.reference, orderId);
-      this.audit('admin', 'payment.confirmed', orderId, { method: payment.method, amount: payment.amount, currency: payment.currency });
+      this.audit('admin', 'payment.confirmed', orderId, { method: payment.method, amount: payment.amount, currency: payment.currency, ...(lifecycle.status === 'expired' ? {latePaymentReason: review!.latePaymentReason.trim()} : {}) });
       this.event('order.fulfilled', order.account_id);
       return { orderId, status: 'paid', replayed: false };
+    });
+  }
+  /** Derive expiry immediately, including before the periodic sweeper runs. */
+  orderLifecycle(orderId: string) {
+    const order = this.store.get<{status: string}>('SELECT status FROM orders WHERE id=?', orderId);
+    requireThat(order, 'ORDER_NOT_FOUND', 404);
+    const deadline = this.store.get<{expires_at: number; expired_at: number | null}>('SELECT * FROM order_deadlines WHERE order_id=?', orderId);
+    const expired = order.status !== 'paid' && ((order.status === 'pending' && !!deadline && deadline.expires_at <= this.now()) || (order.status === 'cancelled' && deadline?.expired_at !== null && deadline?.expired_at !== undefined));
+    return {status: expired ? 'expired' : order.status, expiresAt: deadline?.expires_at ?? null};
+  }
+  expireOrders(): number {
+    return this.store.transaction(() => {
+      const rows = this.store.all<{id: string; account_id: string}>("SELECT o.id,o.account_id FROM orders o JOIN order_deadlines d ON d.order_id=o.id WHERE o.status='pending' AND d.expires_at<=?", this.now());
+      for (const row of rows) {
+        this.store.run("UPDATE orders SET status='cancelled' WHERE id=?", row.id);
+        this.store.run('UPDATE order_deadlines SET expired_at=? WHERE order_id=?', this.now(), row.id);
+        this.audit('system', 'order.expired', row.id);
+      }
+      return rows.length;
     });
   }
   cancelOrder(accountId: string, orderId: string): void {
     this.store.transaction(() => {
       this.assertAccountActive(accountId);
       const row = this.store.get<Order>('SELECT * FROM orders WHERE id=? AND account_id=?', orderId, accountId);
-      requireThat(row, 'ORDER_NOT_FOUND', 404); requireThat(row.status === 'pending', 'ORDER_NOT_PENDING', 409);
+      requireThat(row, 'ORDER_NOT_FOUND', 404); requireThat(this.orderLifecycle(orderId).status === 'pending', 'ORDER_NOT_PENDING', 409);
       this.store.run("UPDATE orders SET status='cancelled' WHERE id=?", orderId);
       this.audit(accountId, 'order.cancelled', orderId);
     });
@@ -498,6 +527,7 @@ export class Framework {
   }
   auditLog() { return this.store.all('SELECT * FROM audit ORDER BY created_at DESC,id DESC LIMIT 100'); }
   cleanupExpired(): void {
+    this.expireOrders();
     this.store.transaction(() => {
       this.store.run('DELETE FROM sessions WHERE expires_at<=?', this.now());
       this.store.run('DELETE FROM challenges WHERE expires_at<=?', this.now());

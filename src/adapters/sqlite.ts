@@ -105,6 +105,12 @@ export class SqliteStore {
         FOREIGN KEY(account_id,group_id) REFERENCES bindings(account_id,group_id) ON DELETE CASCADE);
         INSERT INTO plk_migrations VALUES(4, CAST(strftime('%s','now') AS INTEGER)*1000);`);
     });
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS order_deadlines (
+        order_id TEXT PRIMARY KEY REFERENCES orders(id), expires_at INTEGER NOT NULL, expired_at INTEGER);
+        CREATE INDEX IF NOT EXISTS order_deadline_due ON order_deadlines(expires_at) WHERE expired_at IS NULL;
+        INSERT OR IGNORE INTO plk_migrations VALUES(5, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;

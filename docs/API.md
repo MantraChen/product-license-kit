@@ -75,3 +75,7 @@
 `GET /v1/devices/:groupId/reset` 需要用户 Bearer 会话，返回 state、generation、freeAt、credits、cost、canReset；预览不扣额度。`POST` 同一路径需要 `{generation, cost, confirm:true}` 和 Idempotency-Key；cost 为 free 或 credit。仅能操作当前登录账号的设备组。状态、代次或费用变化会拒绝确认。
 
 `deviceResetStatus` 与 `resetDevice` 也可由可信宿主直接调用。成功重置停止旧设备续期，作废旧挑战，消费免费机会或一次额度并开始新的自然月冷却。后续一次激活返回 cost=reset，不再扣费、不重新延长冷却。绑定 profile 增加 reset_pending 字段。已签发许可证保持原到期时间，不能远程撤销离线副本。
+
+## 订单有效期
+
+createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired。默认有效期 24 小时，FrameworkOptions.orderTtlSeconds 可覆盖。cleanupExpired 同时清理过期订单。过期订单确认接口需增加 latePaymentReason（3–500 字符），仅管理 API 可用。手动取消、重复流水、错误金额、失效资格仍拒绝。
