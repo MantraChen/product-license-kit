@@ -424,6 +424,20 @@ export class Framework {
       return { balance: this.credits(accountId, groupId) };
     });
   }
+  /** Trusted administrator only. Explicitly sets or restores access without fabricating a payment. */
+  setEntitlementAccess(accountId: string, editionId: string, access: 'none' | 'stable' | 'beta', reason: string, key: string) {
+    requireThat(['none', 'stable', 'beta'].includes(access) && reason.trim().length >= 3 && reason.length <= 500, 'INVALID_ENTITLEMENT_CHANGE');
+    this.assertAccountActive(accountId);
+    this.groupForEdition(editionId);
+    return this.command(accountId, 'admin.entitlement', key, { editionId, access, reason }, () => {
+      this.store.run('INSERT INTO entitlements VALUES(?,?,NULL,?) ON CONFLICT(account_id,edition_id) DO UPDATE SET active=excluded.active', accountId, editionId, access === 'none' ? 0 : 1);
+      this.store.run('DELETE FROM entitlement_channels WHERE account_id=? AND edition_id=?', accountId, editionId);
+      if (access === 'beta') this.store.run("INSERT INTO entitlement_channels VALUES(?,?,'beta')", accountId, editionId);
+      this.audit('admin', 'entitlement.access-set', accountId, { editionId, access, reason });
+      this.event('entitlement.updated', accountId);
+      return { editionId, access };
+    });
+  }
   revokeEntitlement(accountId: string, editionId: string, reason: string): void {
     this.store.transaction(() => {
       requireThat(this.owns(accountId, editionId), 'ENTITLEMENT_NOT_FOUND', 404);

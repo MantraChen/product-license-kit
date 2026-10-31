@@ -85,3 +85,7 @@ createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired�
 许可证挑战接受 channel（stable / beta，省略为 stable），签发时再次校验渠道。许可证含 channel、fingerprint；新版 SDK verifyLicense 必须传入本机预期 fingerprint，不能从不可信许可证中抄取预期值。
 
 管理员 GET /v1/admin/payment-exceptions 查询最近记录；POST 同地址提交 orderId、method、reference、amount、currency、reason，登记核实过的实际到账，不授予权益。POST /v1/admin/payment-exceptions/:id/resolve 选择 action=apply 并提交同账号新 orderId 和 reason，或 action=refund 并提交 refundReference 和 reason。refund 仅登记人工已经完成的退款，不调用支付机构。处理及流水占用在同一事务提交，失败回滚，重复处理不重复发放。
+
+## 显式管理版本权限
+
+可信宿主方法 `setEntitlementAccess(accountId, editionId, access, reason, key)`，其中 access 为 `none`、`stable`、`beta`。仅供宿主完成管理员鉴权后调用，没有新增公开 HTTP 端点。方法允许显式恢复撤销权益，保留原订单来源；普通版会清除同版 Beta，撤销会清除所有同版渠道。请求必须包含原因和幂等键，重放旧请求不重新授予权限。平台角色同步属于产品适配器，不在核心中执行。
