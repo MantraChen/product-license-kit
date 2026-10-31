@@ -5,7 +5,8 @@ import { z } from 'zod';
 import { requireThat } from '../core/model.js';
 import { privateDirectory, protectPrivatePath } from './private-storage.js';
 
-const maxBytes = 64 * 1024 * 1024;
+export const backupMaxBytes = 256 * 1024 * 1024;
+const maxBytes = backupMaxBytes;
 const magic = Buffer.from('PLKBACKUP1\n');
 const fileName = /^[A-Za-z0-9_.-]{1,100}$/;
 function key(password: string, salt: Buffer) {
@@ -37,9 +38,11 @@ export function decryptBackup(bundle: Uint8Array, password: string): Record<stri
     decipher.setAAD(magic); decipher.setAuthTag(bytes.subarray(-16));
     raw = JSON.parse(Buffer.concat([decipher.update(bytes.subarray(offset + 28, -16)), decipher.final()]).toString('utf8'));
   } catch { requireThat(false, 'BACKUP_AUTH_FAILED'); }
-  const parsed = z.object({ version: z.literal(1), files: z.record(z.string(), z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)) }).strict().parse(raw);
+  const parsed = z.object({ version: z.literal(1), files: z.record(z.string(), z.string()) }).strict().parse(raw);
   validateNames(Object.keys(parsed.files));
   const files = Object.fromEntries(Object.entries(parsed.files).map(([name, data]) => [name, Buffer.from(data, 'base64')]));
+  // Compare canonical encoding without a repetition-heavy regex over large files.
+  requireThat(Object.entries(parsed.files).every(([name, data]) => files[name]!.toString('base64') === data), 'INVALID_BACKUP');
   requireThat(Object.values(files).reduce((sum, file) => sum + file.length, 0) <= maxBytes, 'BACKUP_TOO_LARGE');
   return files;
 }

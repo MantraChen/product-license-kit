@@ -122,8 +122,9 @@ export async function createApp(framework: Framework, options: { adminToken: str
     protectedApp.post('/orders/:id/confirm', async request => {
       const body = z.object({ method: z.enum(['manual-wechat', 'manual-alipay', 'manual-bank']),
         reference: z.string().min(3).max(128), amount: z.number().int().positive(), currency: z.string().regex(/^[A-Z]{3}$/),
+        latePaymentReason: z.string().trim().min(3).max(500).optional(),
       }).strict().parse(request.body);
-      return framework.confirmPayment(paramsId(request), body);
+      return framework.confirmPayment(paramsId(request), body, body.latePaymentReason ? {latePaymentReason: body.latePaymentReason} : undefined);
     });
     protectedApp.post('/distributions', async request => {
       const body = z.object({ accountId: uuid, editionId: id, releaseId: id }).strict().parse(request.body);

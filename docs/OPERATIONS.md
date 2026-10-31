@@ -38,7 +38,7 @@ pnpm maintenance restore /private/recovery-password.txt /private/backup.plkbacku
 pnpm maintenance rotate-signing /private/recovery-password.txt /private/before-key-rotation.plkbackup
 ```
 
-快照包含已提交的 WAL 数据；加密包使用带认证的 AES-256-GCM 和 scrypt 派生密钥，当前工具限制原始文件总量 64 MiB。恢复先验证认证标签与文件名，仅允许新目录，绝不覆盖活跃数据库。恢复目录的 `environment.env` 是配置备份，应检查其中路径再用于部署。签名轮换先自动备份，保留旧公钥历史；新公钥仍必须经可信发布流程分发给客户端。
+快照包含已提交的 WAL 数据；加密包使用带认证的 AES-256-GCM 和 scrypt 派生密钥，当前工具限制原始文件总量 256 MiB。恢复先验证认证标签与文件名，仅允许新目录，绝不覆盖活跃数据库。恢复目录的 `environment.env` 是配置备份，应检查其中路径再用于部署。签名轮换先自动备份，保留旧公钥历史；新公钥仍必须经可信发布流程分发给客户端。
 
 单进程服务锁阻止重复运行；维护工具拒绝在服务进程存活时执行。异常断电若留下 `.guard` 文件，应确认没有进程正在启动后人工处理，不能直接忽略锁。
 
@@ -56,4 +56,4 @@ pnpm maintenance rotate-signing /private/recovery-password.txt /private/before-k
 
 完整管理门户、操作员 RBAC/MFA、真实支付回调/自动对账/退款、购买前身份认领、PostgreSQL、多节点限流与任务锁、真实文件上传/对象存储、平台签名/HWID/安全密钥存储、定时密钥轮换、持续异地备份与告警。账号停用、手动加密备份恢复和签名轮换已有服务端能力；硬件和生产集成仍需由具体产品完成。
 
-0.3.0 的迁移 4 增加 binding_resets，以账号和设备组关联现存绑定，保存一次重置后等待重新绑定的代次。它保留现有绑定、订单和额度；重启不丢失待绑定状态。重置和后续激活都在事务内执行。升级前备份，降级恢复对应备份。
+0.4.0 的迁移 4 增加 binding_resets，以账号和设备组关联现存绑定，保存一次重置后等待重新绑定的代次。它保留现有绑定、订单和额度；重启不丢失待绑定状态。重置和后续激活都在事务内执行。升级前备份，降级恢复对应备份。
