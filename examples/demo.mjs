@@ -39,6 +39,7 @@ try {
   const license = await client.request('/v1/licenses/issue', { body: { challengeId: licenseChallenge.challengeId,
     signature: signChallenge(licenseChallenge.message, deviceKeys.privateKey) } });
   verifyLicense(license.token, serverKeys.publicKey, { issuer: 'demo-license-service', productId: 'sample-tool', editionId: 'tool-2',
+    fingerprint: {schema: 'demo-v1', digest: sha256('synthetic-hardware')},
     accountId: session.accountId, deviceId: binding.deviceId, devicePublicKey: deviceKeys.publicKey });
   console.log('3. Activated a device and verified a signed, device-bound license using a pinned server key.');
   const distribution = await admin('/distributions', { accountId: session.accountId, editionId: 'tool-2', releaseId: '2.0.0' });

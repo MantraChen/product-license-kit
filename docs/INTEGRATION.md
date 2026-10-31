@@ -61,3 +61,7 @@ SQLite 使用 WAL、外键和显式写事务，适合单节点。业务服务当
 `FrameworkOptions.accountEnabled(accountId)` 可同步查询产品账号状态，必须显式返回 `true` 才允许；它会在核心授权、设备激活、订单与分发路径中校验，不能只在 HTTP 路由补一处检查。框架内置状态通过 `setAccountActive(id, active, reason)` 更新；停用会撤销会话、挑战与设备，恢复不会复活旧令牌，也不删除永久权益。产品的额外会话应在同一个 `store.transaction` 中撤销，嵌套核心事务由 savepoint 保证整体回滚。
 
 网页接入 `guardBrowserRequest` 时，必须传路由器的匹配路由模板；不要传原始 URL。独立 Bot / 设备路由可以明确列入机器接口，但必须保留它们自己的签名或设备证明。`hashPassword` 使用与 V6 兼容的 scrypt 参数，并限制跨 IP 的并发与排队。
+
+## 0.5.0 升级检查
+
+先备份再应用迁移 6。调用 verifyLicense 时新增本机 fingerprint；测试版客户端必须明确 channel=beta。找回密码、修改密码及更换 MFA 应在宿主事务内调用 revokeAccess，并撤销网页会话及未完成设备申请。选择 revokeDevices 不会赠送免费换机机会。异常到账接口只供具名财务人员在核实真实收款后调用。

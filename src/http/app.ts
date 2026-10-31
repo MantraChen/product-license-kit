@@ -47,7 +47,7 @@ export async function createApp(framework: Framework, options: { adminToken: str
   const commandKey = (request: FastifyRequest) => keySchema.parse(request.headers['idempotency-key']);
   const authRate = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
-  app.get('/health', async () => ({ status: 'ok', framework: 'product-license-kit', version: '0.1.1' }));
+  app.get('/health', async () => ({ status: 'ok', framework: 'product-license-kit', version: '0.5.0' }));
   app.get('/v1/catalog', async () => framework.catalog);
   app.get('/v1/signing-key', async () => ({ kid: framework.signer.kid, publicKey: framework.signer.publicKey, issuer: framework.issuer }));
   app.post('/v1/auth/register', authRate, async request => {
@@ -87,8 +87,8 @@ export async function createApp(framework: Framework, options: { adminToken: str
     return framework.activate(accountId, body.challengeId, body.signature, commandKey(request));
   });
   app.post('/v1/licenses/challenges', async request => {
-    const body = z.object({ deviceId: uuid, editionId: id }).strict().parse(request.body);
-    return framework.licenseChallenge(body.deviceId, body.editionId);
+    const body = z.object({ deviceId: uuid, editionId: id, channel: z.enum(['stable','beta']).default('stable') }).strict().parse(request.body);
+    return framework.licenseChallenge(body.deviceId, body.editionId, body.channel);
   });
   app.post('/v1/licenses/issue', async request => {
     const body = z.object({ challengeId: uuid, signature }).strict().parse(request.body);
@@ -125,6 +125,19 @@ export async function createApp(framework: Framework, options: { adminToken: str
         latePaymentReason: z.string().trim().min(3).max(500).optional(),
       }).strict().parse(request.body);
       return framework.confirmPayment(paramsId(request), body, body.latePaymentReason ? {latePaymentReason: body.latePaymentReason} : undefined);
+    });
+    protectedApp.get('/payment-exceptions', async () => framework.paymentExceptions());
+    protectedApp.post('/payment-exceptions', async request => {
+      const body = z.object({ orderId: uuid, method: z.enum(['manual-wechat','manual-alipay','manual-bank']),
+        reference: z.string().trim().min(3).max(128), amount: z.number().int().positive(), currency: z.string().regex(/^[A-Z]{3}$/), reason }).strict().parse(request.body);
+      return framework.recordPaymentException(body.orderId, body, body.reason);
+    });
+    protectedApp.post('/payment-exceptions/:id/resolve', async request => {
+      const body = z.discriminatedUnion('action', [
+        z.object({action: z.literal('apply'), orderId: uuid, reason}).strict(),
+        z.object({action: z.literal('refund'), refundReference: z.string().trim().min(3).max(128), reason}).strict(),
+      ]).parse(request.body);
+      return framework.resolvePaymentException(paramsId(request), body);
     });
     protectedApp.post('/distributions', async request => {
       const body = z.object({ accountId: uuid, editionId: id, releaseId: id }).strict().parse(request.body);

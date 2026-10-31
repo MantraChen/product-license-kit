@@ -23,6 +23,7 @@ export function verifyProof(pem: string, message: string, signature: string): bo
 
 export interface LicenseClaims {
   iss: string; aud: string; sub: string; edition: string; device: string;
+  channel: 'stable' | 'beta'; fingerprint: { schema: string; digest: string };
   keyThumbprint: string; generation: number; ownership: 'perpetual';
   iat: number; nbf: number; exp: number;
 }

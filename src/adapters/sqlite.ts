@@ -111,6 +111,15 @@ export class SqliteStore {
         CREATE INDEX IF NOT EXISTS order_deadline_due ON order_deadlines(expires_at) WHERE expired_at IS NULL;
         INSERT OR IGNORE INTO plk_migrations VALUES(5, CAST(strftime('%s','now') AS INTEGER)*1000);`);
     });
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS payment_exceptions (
+        id TEXT PRIMARY KEY, original_order_id TEXT NOT NULL REFERENCES orders(id),
+        account_id TEXT NOT NULL REFERENCES accounts(id), method TEXT NOT NULL, reference TEXT NOT NULL,
+        amount INTEGER NOT NULL CHECK(amount>0), currency TEXT NOT NULL, reason TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','applied','refunded')), created_at INTEGER NOT NULL,
+        resolved_at INTEGER, resolution TEXT, UNIQUE(method,reference));
+        INSERT OR IGNORE INTO plk_migrations VALUES(6, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {
     return this.db.prepare(sql).get(...params) as T | undefined;

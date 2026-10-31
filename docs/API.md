@@ -79,3 +79,9 @@
 ## 订单有效期
 
 createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired。默认有效期 24 小时，FrameworkOptions.orderTtlSeconds 可覆盖。cleanupExpired 同时清理过期订单。过期订单确认接口需增加 latePaymentReason（3–500 字符），仅管理 API 可用。手动取消、重复流水、错误金额、失效资格仍拒绝。
+
+## 0.5.0 安全与异常到账接口
+
+许可证挑战接受 channel（stable / beta，省略为 stable），签发时再次校验渠道。许可证含 channel、fingerprint；新版 SDK verifyLicense 必须传入本机预期 fingerprint，不能从不可信许可证中抄取预期值。
+
+管理员 GET /v1/admin/payment-exceptions 查询最近记录；POST 同地址提交 orderId、method、reference、amount、currency、reason，登记核实过的实际到账，不授予权益。POST /v1/admin/payment-exceptions/:id/resolve 选择 action=apply 并提交同账号新 orderId 和 reason，或 action=refund 并提交 refundReference 和 reason。refund 仅登记人工已经完成的退款，不调用支付机构。处理及流水占用在同一事务提交，失败回滚，重复处理不重复发放。
