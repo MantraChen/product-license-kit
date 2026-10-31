@@ -5,6 +5,7 @@ import { requireThat } from '../core/model.js';
 
 const claimsSchema = z.object({
   iss: z.string(), aud: z.string(), sub: z.string(), edition: z.string(), device: z.string(),
+  channel: z.enum(['stable', 'beta']), fingerprint: z.object({schema: z.string(), digest: z.string().regex(/^[a-f0-9]{64}$/)}).strict(),
   keyThumbprint: z.string(), generation: z.number().int().positive(), ownership: z.literal('perpetual'),
   iat: z.number().int(), nbf: z.number().int(), exp: z.number().int(),
 }).strict();
@@ -13,11 +14,13 @@ const claimsSchema = z.object({
 export function verifyLicense(token: string, publicKey: string, expected: {
   issuer: string; productId: string; editionId: string; accountId: string;
   deviceId: string; devicePublicKey: string; now?: number;
+  channel?: 'stable' | 'beta'; fingerprint: {schema: string; digest: string};
 }) {
   const claims = claimsSchema.parse(verifyEnvelope(token, publicKey, 'plk-license'));
   const now = Math.floor((expected.now ?? Date.now()) / 1000);
   requireThat(claims.iss === expected.issuer && claims.aud === expected.productId && claims.edition === expected.editionId &&
-    claims.sub === expected.accountId && claims.device === expected.deviceId &&
+    claims.sub === expected.accountId && claims.device === expected.deviceId && claims.channel === (expected.channel ?? 'stable') &&
+    claims.fingerprint.schema === expected.fingerprint.schema && claims.fingerprint.digest === expected.fingerprint.digest &&
     claims.keyThumbprint === normalizePublicKey(expected.devicePublicKey).thumbprint, 'LICENSE_SCOPE_MISMATCH');
   requireThat(claims.nbf <= now && claims.iat <= now && claims.exp > now && claims.exp > claims.iat, 'LICENSE_EXPIRED_OR_NOT_YET_VALID');
   return claims;

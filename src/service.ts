@@ -23,6 +23,11 @@ interface Distribution {
   created_at: number; finalized_at: number | null;
 }
 export interface Fingerprint { schema: string; digest: string }
+export interface Payment { method: string; reference: string; amount: number; currency: string }
+interface PaymentException extends Payment {
+  id: string; original_order_id: string; account_id: string; reason: string; status: string;
+  created_at: number; resolved_at: number | null; resolution: string | null;
+}
 export interface FrameworkOptions {
   store: SqliteStore; catalog: Catalog; signer: EnvelopeSigner;
   providers: IdentityProvider[]; issuer: string; now?: () => number; licenseSeconds?: number; orderTtlSeconds?: number;
@@ -184,6 +189,20 @@ export class Framework {
     this.assertAccountActive(session.account_id); return session.account_id;
   }
   logout(token: string): void { this.store.run('DELETE FROM sessions WHERE hash=?', sha256(token)); }
+  /** Security recovery never grants a free rebind or changes an existing cooldown. */
+  revokeAccess(accountId: string, reason: string, revokeDevices = false): void {
+    requireThat(reason.trim().length >= 3 && reason.length <= 500, 'INVALID_REASON');
+    this.store.transaction(() => {
+      this.account(accountId);
+      this.store.run('DELETE FROM sessions WHERE account_id=?', accountId);
+      this.store.run('UPDATE challenges SET used_at=? WHERE account_id=? AND used_at IS NULL', this.now(), accountId);
+      if (revokeDevices) {
+        this.store.run('UPDATE bindings SET enabled=0,generation=generation+1 WHERE account_id=?', accountId);
+        this.store.run('UPDATE binding_resets SET generation=generation+1 WHERE account_id=?', accountId);
+      }
+      this.audit(accountId, 'access.revoked', accountId, { reason, revokeDevices });
+    });
+  }
   changeIdentity(accountId: string, provider: string, subject: string, reason: string): void {
     requireThat(this.providers.has(provider), 'IDENTITY_PROVIDER_DISABLED');
     this.store.transaction(() => {
@@ -285,7 +304,17 @@ export class Framework {
     return this.store.all<Order>('SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100', accountId)
       .map(row => ({ id: row.id, offer: JSON.parse(row.offer_json) as Offer, ...this.orderLifecycle(row.id), createdAt: row.created_at, paidAt: row.paid_at }));
   }
-  confirmPayment(orderId: string, payment: { method: string; reference: string; amount: number; currency: string }, review?: { latePaymentReason: string }) {
+  confirmPayment(orderId: string, payment: Payment, review?: { latePaymentReason: string }) {
+    return this.fulfillPayment(orderId, payment, review);
+  }
+  private payment(input: Payment): Payment {
+    const payment = { ...input, reference: input.reference.trim() };
+    requireThat(/^[A-Za-z0-9_-]{1,64}$/.test(payment.method) && payment.reference.length >= 3 && payment.reference.length <= 128 &&
+      Number.isSafeInteger(payment.amount) && payment.amount > 0 && /^[A-Z]{3}$/.test(payment.currency), 'INVALID_PAYMENT');
+    return payment;
+  }
+  private fulfillPayment(orderId: string, input: Payment, review?: { latePaymentReason: string }, exceptionId?: string) {
+    const payment = this.payment(input);
     return this.store.transaction(() => {
       const order = this.store.get<Order>('SELECT * FROM orders WHERE id=?', orderId);
       requireThat(order, 'ORDER_NOT_FOUND', 404);
@@ -299,7 +328,9 @@ export class Framework {
       if (lifecycle.status === 'expired') {
         requireThat(review && review.latePaymentReason.trim().length >= 3 && review.latePaymentReason.length <= 500, 'LATE_PAYMENT_REVIEW_REQUIRED', 409);
       } else requireThat(order.status === 'pending', 'ORDER_NOT_PENDING', 409);
-      requireThat(!this.store.get('SELECT 1 FROM orders WHERE payment_method=? AND payment_reference=?', payment.method, payment.reference), 'PAYMENT_REFERENCE_REUSED', 409);
+      requireThat(!this.store.get('SELECT 1 FROM orders WHERE payment_method=? AND trim(payment_reference)=?', payment.method, payment.reference), 'PAYMENT_REFERENCE_REUSED', 409);
+      const reserved = this.store.get<{id: string; status: string}>('SELECT id,status FROM payment_exceptions WHERE method=? AND reference=?', payment.method, payment.reference);
+      requireThat(!reserved || (reserved.id === exceptionId && reserved.status === 'pending'), 'PAYMENT_REFERENCE_REUSED', 409);
       this.checkOfferEligibility(order.account_id, offer);
       if (offer.kind === 'rebind') this.addCredits(order.account_id, offer.groupId!, offer.credits!);
       else this.store.run(`INSERT INTO entitlements VALUES (?,?,?,1) ON CONFLICT(account_id,edition_id)
@@ -309,6 +340,51 @@ export class Framework {
       this.audit('admin', 'payment.confirmed', orderId, { method: payment.method, amount: payment.amount, currency: payment.currency, ...(lifecycle.status === 'expired' ? {latePaymentReason: review!.latePaymentReason.trim()} : {}) });
       this.event('order.fulfilled', order.account_id);
       return { orderId, status: 'paid', replayed: false };
+    });
+  }
+  /** Register money verified in the receiving account, without granting any rights. */
+  recordPaymentException(originalOrderId: string, input: Payment, reason: string) {
+    const payment = this.payment(input);
+    requireThat(reason.trim().length >= 3 && reason.length <= 500, 'INVALID_REASON');
+    return this.store.transaction(() => {
+      const order = this.store.get<Order>('SELECT * FROM orders WHERE id=?', originalOrderId);
+      requireThat(order, 'ORDER_NOT_FOUND', 404);
+      requireThat(!this.store.get('SELECT 1 FROM orders WHERE payment_method=? AND trim(payment_reference)=?', payment.method, payment.reference), 'PAYMENT_REFERENCE_REUSED', 409);
+      const prior = this.store.get<PaymentException>('SELECT * FROM payment_exceptions WHERE method=? AND reference=?', payment.method, payment.reference);
+      if (prior) {
+        requireThat(prior.original_order_id === originalOrderId && prior.amount === payment.amount && prior.currency === payment.currency, 'PAYMENT_REFERENCE_REUSED', 409);
+        return { id: prior.id, status: prior.status, replayed: true };
+      }
+      const id = randomUUID();
+      this.store.run('INSERT INTO payment_exceptions VALUES(?,?,?,?,?,?,?,?,\'pending\',?,NULL,NULL)',
+        id, originalOrderId, order.account_id, payment.method, payment.reference, payment.amount, payment.currency, reason.trim(), this.now());
+      this.audit('admin', 'payment.exception-recorded', id, { originalOrderId, amount: payment.amount, currency: payment.currency, reason });
+      return { id, status: 'pending', replayed: false };
+    });
+  }
+  paymentExceptions() {
+    return this.store.all<PaymentException>('SELECT * FROM payment_exceptions ORDER BY created_at DESC,id LIMIT 100');
+  }
+  resolvePaymentException(id: string, resolution: { action: 'apply'; orderId: string; reason: string } | { action: 'refund'; refundReference: string; reason: string }) {
+    requireThat(resolution.reason.trim().length >= 3 && resolution.reason.length <= 500, 'INVALID_REASON');
+    if (resolution.action === 'refund') requireThat(resolution.refundReference.trim().length >= 3 && resolution.refundReference.length <= 128, 'INVALID_PAYMENT');
+    return this.store.transaction(() => {
+      const row = this.store.get<PaymentException>('SELECT * FROM payment_exceptions WHERE id=?', id);
+      requireThat(row, 'PAYMENT_EXCEPTION_NOT_FOUND', 404);
+      const serialized = JSON.stringify(resolution);
+      if (row.status !== 'pending') {
+        requireThat(row.resolution === serialized, 'PAYMENT_EXCEPTION_RESOLVED', 409);
+        return { id, status: row.status, replayed: true };
+      }
+      if (resolution.action === 'apply') {
+        const target = this.store.get<Order>('SELECT * FROM orders WHERE id=?', resolution.orderId);
+        requireThat(target && target.account_id === row.account_id, 'PAYMENT_ACCOUNT_MISMATCH', 409);
+        this.fulfillPayment(target.id, row, { latePaymentReason: resolution.reason }, row.id);
+      }
+      const status = resolution.action === 'apply' ? 'applied' : 'refunded';
+      this.store.run('UPDATE payment_exceptions SET status=?,resolved_at=?,resolution=? WHERE id=?', status, this.now(), serialized, id);
+      this.audit('admin', `payment.exception-${status}`, id, resolution);
+      return { id, status, replayed: false };
     });
   }
   /** Derive expiry immediately, including before the periodic sweeper runs. */
@@ -352,6 +428,7 @@ export class Framework {
     this.store.transaction(() => {
       requireThat(this.owns(accountId, editionId), 'ENTITLEMENT_NOT_FOUND', 404);
       this.store.run('UPDATE entitlements SET active=0 WHERE account_id=? AND edition_id=?', accountId, editionId);
+      this.store.run('DELETE FROM entitlement_channels WHERE account_id=? AND edition_id=?', accountId, editionId);
       this.audit('admin', 'entitlement.revoked', accountId, { editionId, reason });
       this.event('entitlement.revoked', accountId);
     });
@@ -423,7 +500,9 @@ export class Framework {
         generation = previous.generation + 1;
         if (this.store.get('SELECT 1 FROM binding_resets WHERE account_id=? AND group_id=? AND generation=?', accountId, group.id, previous.generation)) {
           cost = 'reset'; freeAt = previous.free_at;
-        } else if (previous.key_thumbprint === payload.thumbprint) {
+        } else if (previous.key_thumbprint === payload.thumbprint &&
+          (JSON.parse(previous.fingerprint_json) as Fingerprint).schema === payload.fingerprint.schema &&
+          (JSON.parse(previous.fingerprint_json) as Fingerprint).digest === payload.fingerprint.digest) {
           cost = 'same-device'; deviceId = previous.device_id; freeAt = previous.free_at;
           generation = previous.enabled ? previous.generation : generation;
         } else cost = rebindCost(previous.free_at, this.now(), this.credits(accountId, group.id));
@@ -446,25 +525,28 @@ export class Framework {
     const row = this.store.get<Challenge>('SELECT * FROM challenges WHERE id=?', id);
     requireThat(row && row.kind === kind && row.used_at === null && row.expires_at > this.now(), 'INVALID_CHALLENGE', 401); return row;
   }
-  licenseChallenge(deviceId: string, editionId: string) {
+  licenseChallenge(deviceId: string, editionId: string, channel: 'stable' | 'beta' = 'stable') {
     const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE device_id=? AND enabled=1', deviceId);
     requireThat(binding && this.owns(binding.account_id, editionId), 'LICENSE_UNAVAILABLE', 403);
     this.assertAccountActive(binding.account_id);
+    requireThat(this.hasReleaseAccess(binding.account_id, editionId, channel), 'LICENSE_UNAVAILABLE', 403);
     requireThat(this.groupForEdition(editionId).groupId === binding.group_id, 'LICENSE_UNAVAILABLE', 403);
-    return this.challenge(binding.account_id, 'license', { deviceId, editionId, generation: binding.generation });
+    return this.challenge(binding.account_id, 'license', { deviceId, editionId, channel, generation: binding.generation });
   }
   issueLicense(challengeId: string, signature: string) {
     return this.store.transaction(() => {
       const challenge = this.loadChallenge(challengeId, 'license');
       this.assertAccountActive(challenge.account_id);
-      const payload = JSON.parse(challenge.payload) as { deviceId: string; editionId: string; generation: number };
+      const payload = JSON.parse(challenge.payload) as { deviceId: string; editionId: string; channel?: 'stable' | 'beta'; generation: number };
       const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE device_id=? AND enabled=1', payload.deviceId);
       requireThat(binding && binding.account_id === challenge.account_id && binding.generation === payload.generation &&
         this.owns(binding.account_id, payload.editionId) && this.groupForEdition(payload.editionId).groupId === binding.group_id, 'LICENSE_UNAVAILABLE', 403);
       requireThat(verifyProof(binding.public_key, challenge.message, signature), 'INVALID_DEVICE_PROOF', 401);
+      requireThat(this.hasReleaseAccess(binding.account_id, payload.editionId, payload.channel ?? 'stable'), 'LICENSE_UNAVAILABLE', 403);
       const seconds = Math.floor(this.now() / 1000);
       const claims: LicenseClaims = { iss: this.issuer, aud: this.groupForEdition(payload.editionId).productId,
-        sub: binding.account_id, edition: payload.editionId, device: binding.device_id, keyThumbprint: binding.key_thumbprint,
+        sub: binding.account_id, edition: payload.editionId, channel: payload.channel ?? 'stable', fingerprint: JSON.parse(binding.fingerprint_json) as Fingerprint,
+        device: binding.device_id, keyThumbprint: binding.key_thumbprint,
         generation: binding.generation, ownership: 'perpetual', iat: seconds, nbf: seconds, exp: seconds + this.licenseSeconds };
       const token = this.signer.sign(claims, 'plk-license');
       this.store.run('UPDATE challenges SET used_at=? WHERE id=?', this.now(), challengeId);

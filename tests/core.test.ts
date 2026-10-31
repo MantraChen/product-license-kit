@@ -157,6 +157,7 @@ test('client verifies signature, issuer, product, edition, account, device, key 
   const h = harness(); t.after(h.close); const { accountId } = await h.register(); h.buy(accountId); const active = h.activate(accountId);
   const license = h.issue(active.binding.deviceId, active.pair.privateKey);
   const expected = { issuer: 'test-issuer', productId: 'sample-tool', editionId: 'tool-1', accountId,
+    fingerprint: {schema: 'test-v1', digest: sha256('synthetic')},
     deviceId: active.binding.deviceId, devicePublicKey: active.pair.publicKey, now: h.now() };
   assert.equal(verifyLicense(license.token, h.serverKeys.publicKey, expected).ownership, 'perpetual');
   for (const field of ['issuer', 'productId', 'editionId', 'accountId', 'deviceId'] as const) {
