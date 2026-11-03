@@ -67,7 +67,7 @@ export class EnvelopeSigner {
     this.publicKey = createPublicKey(this.privateKey).export({ type: 'spki', format: 'pem' }).toString();
     this.kid = normalizePublicKey(this.publicKey).thumbprint.slice(0, 24);
   }
-  sign(payload: object, type: 'plk-license' | 'plk-distribution' | 'plk-operation'): string {
+  sign(payload: object, type: 'plk-license' | 'plk-distribution' | 'plk-operation' | 'plk-tpm-upgrade-cancel'): string {
     const header = Buffer.from(JSON.stringify({ alg: 'EdDSA', typ: type, kid: this.kid })).toString('base64url');
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const message = `${header}.${body}`;
