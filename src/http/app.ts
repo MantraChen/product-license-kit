@@ -11,7 +11,7 @@ const subject = z.string().min(1).max(128);
 const proof = z.string().min(1).max(4096);
 const reason = z.string().min(3).max(500);
 const uuid = z.string().uuid();
-const signature = z.string().regex(/^[A-Za-z0-9_-]{86}$/);
+const signature = z.string().regex(/^(?:[A-Za-z0-9_-]{86}|[A-Za-z0-9_-]{342})$/);
 const keySchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}$/);
 const paramsId = (request: FastifyRequest) => z.object({ id: uuid }).parse(request.params).id;
 const bearer = (request: FastifyRequest): string => {

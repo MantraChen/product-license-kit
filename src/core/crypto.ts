@@ -1,4 +1,4 @@
-import { createHash, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify } from 'node:crypto';
+import { constants, createHash, createPrivateKey, createPublicKey, randomBytes, sign, timingSafeEqual, verify } from 'node:crypto';
 import { requireThat } from './model.js';
 
 export const randomToken = () => randomBytes(32).toString('base64url');
@@ -21,6 +21,36 @@ export function verifyProof(pem: string, message: string, signature: string): bo
   } catch { return false; }
 }
 
+// Device authentication supports Windows TPM-compatible RSA separately from the
+// Ed25519-only server envelope trust roots. The stored key selects the algorithm.
+export function normalizeDevicePublicKey(pem: string): { pem: string; thumbprint: string; algorithm: 'Ed25519' | 'PS256' } {
+  requireThat(pem.length <= 2048 && /^\s*-----BEGIN PUBLIC KEY-----\r?\n[A-Za-z0-9+/=\r\n]+-----END PUBLIC KEY-----\s*$/.test(pem), 'INVALID_DEVICE_KEY');
+  try {
+    const key = createPublicKey(pem);
+    const algorithm = key.asymmetricKeyType === 'ed25519' ? 'Ed25519' :
+      key.asymmetricKeyType === 'rsa' && key.asymmetricKeyDetails?.modulusLength === 2048 &&
+      key.asymmetricKeyDetails.publicExponent === 65537n ? 'PS256' : null;
+    requireThat(algorithm, 'INVALID_DEVICE_KEY');
+    const der = key.export({ type: 'spki', format: 'der' });
+    const encoded = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '');
+    requireThat(Buffer.from(encoded, 'base64').equals(der) && der.toString('base64') === encoded, 'INVALID_DEVICE_KEY');
+    return { pem: key.export({ type: 'spki', format: 'pem' }).toString(), thumbprint: sha256(der), algorithm };
+  } catch { throw new Error('INVALID_DEVICE_KEY'); }
+}
+export function verifyDeviceProof(pem: string, message: string, signature: string): boolean {
+  try {
+    const normalized = normalizeDevicePublicKey(pem);
+    const length = normalized.algorithm === 'Ed25519' ? 86 : 342;
+    if (signature.length !== length || !/^[A-Za-z0-9_-]+$/.test(signature)) return false;
+    const bytes = Buffer.from(signature, 'base64url');
+    if (bytes.toString('base64url') !== signature) return false;
+    return normalized.algorithm === 'Ed25519'
+      ? verify(null, Buffer.from(message), normalized.pem, bytes)
+      : verify('sha256', Buffer.from(message), { key: normalized.pem,
+        padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, bytes);
+  } catch { return false; }
+}
+
 export interface LicenseClaims {
   iss: string; aud: string; sub: string; edition: string; device: string;
   channel: 'stable' | 'beta'; fingerprint: { schema: string; digest: string };
@@ -37,7 +67,7 @@ export class EnvelopeSigner {
     this.publicKey = createPublicKey(this.privateKey).export({ type: 'spki', format: 'pem' }).toString();
     this.kid = normalizePublicKey(this.publicKey).thumbprint.slice(0, 24);
   }
-  sign(payload: object, type: 'plk-license' | 'plk-distribution'): string {
+  sign(payload: object, type: 'plk-license' | 'plk-distribution' | 'plk-operation' | 'plk-tpm-upgrade-cancel'): string {
     const header = Buffer.from(JSON.stringify({ alg: 'EdDSA', typ: type, kid: this.kid })).toString('base64url');
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const message = `${header}.${body}`;

@@ -1,6 +1,6 @@
-import { createPrivateKey, sign } from 'node:crypto';
+import { constants, createPrivateKey, createPublicKey, sign } from 'node:crypto';
 import { z } from 'zod';
-import { normalizePublicKey, sha256, verifyEnvelope } from '../core/crypto.js';
+import { normalizeDevicePublicKey, sha256, verifyEnvelope } from '../core/crypto.js';
 import { requireThat } from '../core/model.js';
 
 const claimsSchema = z.object({
@@ -21,7 +21,7 @@ export function verifyLicense(token: string, publicKey: string, expected: {
   requireThat(claims.iss === expected.issuer && claims.aud === expected.productId && claims.edition === expected.editionId &&
     claims.sub === expected.accountId && claims.device === expected.deviceId && claims.channel === (expected.channel ?? 'stable') &&
     claims.fingerprint.schema === expected.fingerprint.schema && claims.fingerprint.digest === expected.fingerprint.digest &&
-    claims.keyThumbprint === normalizePublicKey(expected.devicePublicKey).thumbprint, 'LICENSE_SCOPE_MISMATCH');
+    claims.keyThumbprint === normalizeDevicePublicKey(expected.devicePublicKey).thumbprint, 'LICENSE_SCOPE_MISMATCH');
   requireThat(claims.nbf <= now && claims.iat <= now && claims.exp > now && claims.exp > claims.iat, 'LICENSE_EXPIRED_OR_NOT_YET_VALID');
   return claims;
 }
@@ -29,8 +29,9 @@ export function verifyLicense(token: string, publicKey: string, expected: {
 export function signChallenge(message: string, devicePrivateKey: string): string {
   requireThat(message.startsWith('["product-license-kit",1,'), 'UNKNOWN_CHALLENGE_PROTOCOL');
   const key = createPrivateKey(devicePrivateKey);
-  requireThat(key.asymmetricKeyType === 'ed25519', 'ED25519_REQUIRED');
-  return sign(null, Buffer.from(message), key).toString('base64url');
+  const normalized = normalizeDevicePublicKey(createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString());
+  return (normalized.algorithm === 'Ed25519' ? sign(null, Buffer.from(message), key) :
+    sign('sha256', Buffer.from(message), { key, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 })).toString('base64url');
 }
 
 export function verifyDistribution(token: string, publicKey: string, artifact: Uint8Array,

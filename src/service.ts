@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { SqliteStore } from './adapters/sqlite.js';
 import { addCalendarMonths, requireThat, rebindCost, type Catalog, type IdentityProvider,
   type NotificationSink, type Offer, type VerifiedIdentity } from './core/model.js';
-import { EnvelopeSigner, normalizePublicKey, randomToken, sha256, verifyProof, type LicenseClaims } from './core/crypto.js';
+import { EnvelopeSigner, normalizeDevicePublicKey, randomToken, sha256, verifyDeviceProof, type LicenseClaims } from './core/crypto.js';
 
 interface Account { id: string; provider: string; subject: string; created_at: number }
 interface Invitation { hash: string; provider: string; subject: string; expires_at: number; used_at: number | null }
@@ -493,8 +493,8 @@ export class Framework {
   enrollmentChallenge(accountId: string, groupId: string, publicKey: string, fingerprint: Fingerprint) {
     this.assertAccountActive(accountId);
     requireThat(this.ownsGroup(accountId, groupId), 'GROUP_NOT_OWNED', 403);
-    let normalized: ReturnType<typeof normalizePublicKey>;
-    try { normalized = normalizePublicKey(publicKey); } catch { requireThat(false, 'INVALID_DEVICE_KEY'); }
+    let normalized: ReturnType<typeof normalizeDevicePublicKey>;
+    try { normalized = normalizeDevicePublicKey(publicKey); } catch { requireThat(false, 'INVALID_DEVICE_KEY'); }
     return this.challenge(accountId, 'enroll', { groupId, publicKey: normalized.pem, thumbprint: normalized.thumbprint, fingerprint });
   }
   activate(accountId: string, challengeId: string, signature: string, key: string) {
@@ -502,7 +502,7 @@ export class Framework {
       const challenge = this.loadChallenge(challengeId, 'enroll');
       requireThat(challenge.account_id === accountId, 'CHALLENGE_NOT_FOUND', 404);
       const payload = JSON.parse(challenge.payload) as { groupId: string; publicKey: string; thumbprint: string; fingerprint: Fingerprint };
-      requireThat(verifyProof(payload.publicKey, challenge.message, signature), 'INVALID_DEVICE_PROOF', 401);
+      requireThat(verifyDeviceProof(payload.publicKey, challenge.message, signature), 'INVALID_DEVICE_PROOF', 401);
       requireThat(this.ownsGroup(accountId, payload.groupId), 'GROUP_NOT_OWNED', 403);
       const group = this.catalog.groups.find(g => g.id === payload.groupId)!;
       const previous = this.store.get<Binding>('SELECT * FROM bindings WHERE account_id=? AND group_id=?', accountId, group.id);
@@ -555,7 +555,7 @@ export class Framework {
       const binding = this.store.get<Binding>('SELECT * FROM bindings WHERE device_id=? AND enabled=1', payload.deviceId);
       requireThat(binding && binding.account_id === challenge.account_id && binding.generation === payload.generation &&
         this.owns(binding.account_id, payload.editionId) && this.groupForEdition(payload.editionId).groupId === binding.group_id, 'LICENSE_UNAVAILABLE', 403);
-      requireThat(verifyProof(binding.public_key, challenge.message, signature), 'INVALID_DEVICE_PROOF', 401);
+      requireThat(verifyDeviceProof(binding.public_key, challenge.message, signature), 'INVALID_DEVICE_PROOF', 401);
       requireThat(this.hasReleaseAccess(binding.account_id, payload.editionId, payload.channel ?? 'stable'), 'LICENSE_UNAVAILABLE', 403);
       const seconds = Math.floor(this.now() / 1000);
       const claims: LicenseClaims = { iss: this.issuer, aud: this.groupForEdition(payload.editionId).productId,
