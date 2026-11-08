@@ -266,12 +266,14 @@ export class Framework {
       (channel === 'stable' || (channel === 'beta' && !!this.store.get(
         "SELECT 1 FROM entitlement_channels WHERE account_id=? AND edition_id=? AND channel='beta'", accountId, editionId)));
   }
-  bestUpgradeOffer(accountId: string, editionId: string) {
+  bestUpgradeOffer(accountId: string, editionId: string, channel: 'stable' | 'beta' = 'stable') {
     this.assertAccountActive(accountId);
     this.groupForEdition(editionId);
-    requireThat(!this.owns(accountId, editionId), 'EDITION_ALREADY_OWNED', 409);
-    const candidates = this.catalog.offers.filter(o => o.kind === 'upgrade' &&
-      o.editionId === editionId && this.owns(accountId, o.requiresEditionId!));
+    requireThat(!this.hasReleaseAccess(accountId, editionId, channel), channel === 'beta' ? 'CHANNEL_ALREADY_OWNED' : 'EDITION_ALREADY_OWNED', 409);
+    const candidates = this.catalog.offers.filter(o =>
+      o.editionId === editionId && (o.channel ?? 'stable') === channel &&
+      ((o.kind === 'channel' && this.owns(accountId, editionId)) ||
+       (o.kind === 'upgrade' && this.hasReleaseAccess(accountId, o.requiresEditionId!, o.requiresChannel ?? 'stable'))));
     requireThat(new Set(candidates.map(o => o.currency)).size <= 1, 'AMBIGUOUS_UPGRADE_CURRENCY');
     const offer = candidates.sort((a, b) => a.amount - b.amount || a.id.localeCompare(b.id))[0];
     requireThat(offer, 'UPGRADE_NOT_ELIGIBLE', 403);
@@ -295,10 +297,13 @@ export class Framework {
     this.assertAccountActive(accountId);
     if (offer.kind === 'rebind') requireThat(this.ownsGroup(accountId, offer.groupId!), 'GROUP_NOT_OWNED', 403);
     else {
-      requireThat(!this.owns(accountId, offer.editionId!), 'EDITION_ALREADY_OWNED', 409);
-      if (offer.kind === 'upgrade') requireThat(this.owns(accountId, offer.requiresEditionId!), 'UPGRADE_NOT_ELIGIBLE', 403);
+      const channel = offer.channel ?? 'stable';
+      requireThat(!this.hasReleaseAccess(accountId, offer.editionId!, channel), channel === 'beta' ? 'CHANNEL_ALREADY_OWNED' : 'EDITION_ALREADY_OWNED', 409);
+      if (offer.kind === 'channel') requireThat(this.owns(accountId, offer.editionId!), 'UPGRADE_NOT_ELIGIBLE', 403);
+      if (offer.kind === 'upgrade') requireThat(this.hasReleaseAccess(accountId, offer.requiresEditionId!, offer.requiresChannel ?? 'stable'), 'UPGRADE_NOT_ELIGIBLE', 403);
     }
   }
+
   orders(accountId: string) {
     this.assertAccountActive(accountId);
     return this.store.all<Order>('SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100', accountId)
@@ -333,8 +338,9 @@ export class Framework {
       requireThat(!reserved || (reserved.id === exceptionId && reserved.status === 'pending'), 'PAYMENT_REFERENCE_REUSED', 409);
       this.checkOfferEligibility(order.account_id, offer);
       if (offer.kind === 'rebind') this.addCredits(order.account_id, offer.groupId!, offer.credits!);
-      else this.store.run(`INSERT INTO entitlements VALUES (?,?,?,1) ON CONFLICT(account_id,edition_id)
+      else if (!this.owns(order.account_id, offer.editionId!)) this.store.run(`INSERT INTO entitlements VALUES (?,?,?,1) ON CONFLICT(account_id,edition_id)
         DO UPDATE SET active=1,order_id=excluded.order_id`, order.account_id, offer.editionId!, orderId);
+      if (offer.channel === 'beta') this.store.run("INSERT OR IGNORE INTO entitlement_channels VALUES(?,?,'beta')", order.account_id, offer.editionId!);
       this.store.run('UPDATE orders SET status=?,paid_at=?,payment_method=?,payment_reference=? WHERE id=?',
         'paid', this.now(), payment.method, payment.reference, orderId);
       this.audit('admin', 'payment.confirmed', orderId, { method: payment.method, amount: payment.amount, currency: payment.currency, ...(lifecycle.status === 'expired' ? {latePaymentReason: review!.latePaymentReason.trim()} : {}) });
