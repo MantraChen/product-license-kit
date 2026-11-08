@@ -93,3 +93,7 @@ docs/             接入、部署、协议、贡献和版本计划
 外部 PR 需要贡献者明确接受贡献授权：贡献者保留自己的著作权，同时授权项目维护者使用贡献，包括商业使用及再许可。这不向其他使用者授予商用权。不同意额外贡献授权时，可讨论问题或维护符合许可证要求的非商业分支，无需提交可合并的代码贡献。
 
 Required Notice: Copyright 2026 MantraChen (https://github.com/MantraChen)
+
+### Optional Beta channel orders
+
+Offers may specify `channel: "beta"`. The `channel` offer kind requires existing Stable ownership of the target edition. Upgrade offers may specify `requiresChannel: "beta"` to require source Beta access. `bestUpgradeOffer(accountId, editionId, channel)` defaults to Stable and selects only matching target-channel offers with verified prerequisites. Beta access includes Stable, and payment rechecks prerequisites in the fulfillment transaction. Same-edition top-ups preserve the original Stable order provenance. Old catalogs and order snapshots without channel fields retain Stable semantics; no database migration is required.

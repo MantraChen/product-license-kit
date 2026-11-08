@@ -16,8 +16,9 @@ export const catalogSchema = z.object({
   products: z.array(z.object({ id, name: z.string().min(1).max(100), groupId: id }).strict()).min(1),
   editions: z.array(z.object({ id, productId: id, name: z.string().min(1).max(100) }).strict()).min(1),
   offers: z.array(z.object({
-    id, kind: z.enum(['edition', 'upgrade', 'rebind']),
+    id, kind: z.enum(['edition', 'upgrade', 'channel', 'rebind']),
     editionId: id.optional(), requiresEditionId: id.optional(), groupId: id.optional(),
+    channel: z.literal('beta').optional(), requiresChannel: z.literal('beta').optional(),
     credits: z.number().int().min(1).max(100).optional(),
     amount: z.number().int().min(1).max(100_000_000), currency: z.string().regex(/^[A-Z]{3}$/),
   }).strict()),
@@ -34,10 +35,12 @@ export function parseCatalog(input: unknown): Catalog {
   for (const offer of catalog.offers) {
     if (offer.kind === 'rebind') {
       requireThat(offer.credits && catalog.groups.some(g => g.id === offer.groupId), 'INVALID_CREDIT_OFFER');
-      requireThat(!offer.editionId && !offer.requiresEditionId, 'INVALID_CREDIT_OFFER');
+      requireThat(!offer.editionId && !offer.requiresEditionId && !offer.channel && !offer.requiresChannel, 'INVALID_CREDIT_OFFER');
     } else {
       const target = catalog.editions.find(e => e.id === offer.editionId);
       requireThat(target && !offer.credits && !offer.groupId, 'INVALID_EDITION_OFFER');
+      requireThat(!offer.requiresChannel || (offer.kind === 'upgrade' && offer.channel === 'beta'), 'INVALID_UPGRADE_OFFER');
+      requireThat(offer.kind !== 'channel' || offer.channel === 'beta', 'INVALID_EDITION_OFFER');
       if (offer.kind === 'upgrade') {
         const source = catalog.editions.find(e => e.id === offer.requiresEditionId);
         requireThat(source && source.id !== target.id && source.productId === target.productId, 'INVALID_UPGRADE_OFFER');
