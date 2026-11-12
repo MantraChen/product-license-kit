@@ -1,5 +1,10 @@
 # HTTP API v1
 
+## 0.7.0 商品兼容说明
+
+目录 `offers.kind` 支持 edition、upgrade、channel、rebind；`channel` 与 `requiresChannel` 的可选值为 beta。HTTP 路由保持不变，新增商品仍走原下单和核款接口。库方法 `bestUpgradeOffer` 新增可选第三参数 stable/beta，默认 stable。具体资格与付款来源规则见 [接入指南](INTEGRATION.md)。
+
+
 默认本地地址 `http://127.0.0.1:3100`。生产必须通过 HTTPS。JSON 请求体上限 16 KiB。响应禁止缓存。通用错误：`{"error":"CODE"}`；400 为输入错误，401 为认证失败，403 为权限不足，409 为状态冲突，429 为限流。
 
 本接口供客户端和服务端调用。不接受带 Origin 的浏览器请求，不使用 Cookie，也不开放跨域。门户应通过自己的同源后端接入，不要把管理员凭据传给浏览器。
@@ -33,7 +38,7 @@
 | `GET /v1/orders` | 最近 100 条本账号订单 |
 | `POST /v1/orders` | `{offerId}`；需要幂等键；返回订单 ID 与价格快照 |
 | `POST /v1/orders/:id/cancel` | 仅可取消本账号待支付订单 |
-| `POST /v1/devices/challenges` | `{groupId, publicKey, fingerprint:{schema,digest}}`；Ed25519 SPKI PEM 公钥；digest 为 64 位小写十六进制 |
+| `POST /v1/devices/challenges` | `{groupId, publicKey, fingerprint:{schema,digest}}`；Ed25519 或 RSA-2048/PSS-SHA256 的规范 SPKI PEM 公钥；digest 为 64 位小写十六进制 |
 | `POST /v1/devices/activate` | `{challengeId, signature}`；需要幂等键；返回设备 ID、代次、成本和下次免费时间 |
 | `GET /v1/distributions` | 最近 100 条本账号已完成且仍有权益的分发清单；不包含下载 URL |
 

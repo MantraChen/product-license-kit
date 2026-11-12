@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.0 — source version, 2026-11-12
+
+No release tag or npm publication is implied.
+
+- Integrate the product-tested Beta channel offers into the framework repository: same-edition top-ups, Beta direct purchases, source-channel prerequisites and channel-aware cheapest upgrades.
+- Recheck eligibility at order creation and fulfillment; preserve the original Stable purchase provenance when granting Beta.
+- Document the previously merged TPM-compatible RSA-PSS device proofs and scoped operation/cancellation envelopes; server envelope trust remains Ed25519.
+- Refresh architecture, integration, protocol, roadmap and system guides against the source. No database migration is introduced by this release.
+
+## 0.6.0 — historical source baseline
+
+- Explicit audited `setEntitlementAccess` changes, including restoration, with idempotency and paid provenance preservation.
+
+## 0.5.0 — historical source baseline
+
+- Channel- and fingerprint-scoped device licenses, security recovery revocation, exceptional payment reconciliation and migration 6.
+
+## 0.4.0 — historical source baseline
+
+- Order expiry and reviewed late payments, migration 5 and 256 MiB backup capacity.
+
+## 0.3.0 — historical source baseline
+
+- Confirmed device resets and prepaid re-enrollment with migration 4.
+
+
 ## 0.2.0 — source version, 2026-10-31
 
 This records the package/source version; no release tag or registry publication is implied.
