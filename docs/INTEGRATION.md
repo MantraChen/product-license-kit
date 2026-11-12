@@ -1,5 +1,16 @@
 # 适配器接入
 
+## 0.7.0 商品与渠道接入
+
+`edition` 商品可设置 `channel: beta`，一次购买目标 Stable 与 Beta；`channel` 商品须设置 `channel: beta`，要求已有目标 Stable；`upgrade` 可设置目标 `channel: beta`，并以 `requiresChannel: beta` 要求来源版本 Beta。省略 channel 保持 Stable 行为。
+
+调用 `bestUpgradeOffer(accountId, editionId, channel)` 选择合格补差；第三参数默认 stable。该方法比较升级和同版补差，不包含直购商品，宿主需要自行比较合格直购与补差。币种混用拒绝比较，同价按商品 ID 排序。
+
+订单保存商品快照。核款复查来源资格，失败不消耗流水或发放权益；Beta 补差不覆盖既有 Stable 付款来源，不为历史认领虚构订单。新增商品复用现有表，无新迁移。
+
+宿主应在进入框架事务前完成外部身份查询，在事务内复核账号、身份和配置版本。框架不直接查询 EXAMBIA 的 KOOK 角色，也不包含产品的 TPM、更新器和个人 EXE 工厂。
+
+
 ## 已验证的历史授权（0.2）
 
 宿主必须先从受信平台核实账号身份与购买凭证，再调用 `importEntitlement(accountId, editionId, { source, reference, reason, betaAccess })`。这是宿主服务方法，没有公开认领 HTTP 接口，不能接受客户端自报的身份组。`reference` 使用平台身份与服务器组合的稳定摘要，同一来源、凭证、版本只能属于一个账号。识别已有授权不会覆盖其付款来源，已撤销授权不会自动恢复；重复识别幂等，退群不会撤销已确认的永久权益。

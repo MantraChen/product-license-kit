@@ -1,12 +1,21 @@
 # Product License Kit
 
+## 2026-11-12 框架基线
+
+本轮将产品此前使用的 Beta 商品与渠道报价代码纳入框架版本管理。0.7.0 为源码版本，未创建发布标签或发布 npm 包。服务端信封仍只信任 Ed25519；设备证明支持 Ed25519 与 RSA-2048/PSS-SHA256，支持 RSA 公钥不等于已验证 TPM 硬件。
+
+Beta 可通过同版 `channel` 商品、带 `channel: beta` 的直购商品或跨版升级商品发放；`requiresChannel: beta` 约束来源版本资格。创建订单及核款均复核资格，补差保留原 Stable 付款来源。详见 [接入指南](docs/INTEGRATION.md) 与 [客户端协议](docs/PROTOCOL.md)。
+
+EXAMBIA 的 WPF/WebView2、TPM 证明/UAC、KOOK 实时身份组、个人 EXE 工厂及 V3/V4 引擎属于产品层，框架没有内置这些产品功能。
+
+
 一个可复用的产品授权与分发框架。把账号身份、版本权益、订单、设备绑定和分发追溯分开管理，通过适配器接入不同产品与社区平台。
 
 **源码可见，仅允许许可证规定的非商业用途；欢迎提交 PR。** 使用 [PolyForm Noncommercial 1.0.0](LICENSE)，不属于 OSI 定义的开放源代码软件。第三方商用需另行获得授权；贡献前请阅读 [贡献说明](CONTRIBUTING.md) 和 [贡献授权协议](CONTRIBUTOR_AGREEMENT.md)。
 
 ## 当前状态
 
-`0.6.0` 是当前源码中的 API 核心与接入参考实现；包含设备自助重置、安全维护、历史授权认领、同版 Beta 资格与最低固定升级价，新增渠道许可证、安全恢复和异常到账处理，未发布 npm 包。它适合非商业实验和扩展开发；生产接入还需要真实身份配置、管理端强认证、支付与交付适配器、备份及运维措施。没有附带现成的支付账户、Bot、客户数据或 Windows 产品代码。
+`0.7.0` 是当前源码中的 API 核心与接入参考实现；包含设备自助重置、安全维护、历史授权认领、同版 Beta 资格与最低固定升级价，包含渠道许可证、安全恢复、异常到账处理、显式权益管理、RSA-PSS 设备证明和付费 Beta 补差，未发布 npm 包。它适合非商业实验和扩展开发；生产接入还需要真实身份配置、管理端强认证、支付与交付适配器、备份及运维措施。没有附带现成的支付账户、Bot、客户数据或 Windows 产品代码。
 
 | 能力 | 当前实现 |
 | --- | --- |
@@ -93,3 +102,7 @@ docs/             接入、部署、协议、贡献和版本计划
 外部 PR 需要贡献者明确接受贡献授权：贡献者保留自己的著作权，同时授权项目维护者使用贡献，包括商业使用及再许可。这不向其他使用者授予商用权。不同意额外贡献授权时，可讨论问题或维护符合许可证要求的非商业分支，无需提交可合并的代码贡献。
 
 Required Notice: Copyright 2026 MantraChen (https://github.com/MantraChen)
+
+### Optional Beta channel orders
+
+Offers may specify `channel: "beta"`. The `channel` offer kind requires existing Stable ownership of the target edition. Upgrade offers may specify `requiresChannel: "beta"` to require source Beta access. `bestUpgradeOffer(accountId, editionId, channel)` defaults to Stable and selects only matching target-channel offers with verified prerequisites. Beta access includes Stable, and payment rechecks prerequisites in the fulfillment transaction. Same-edition top-ups preserve the original Stable order provenance. Old catalogs and order snapshots without channel fields retain Stable semantics; no database migration is required.

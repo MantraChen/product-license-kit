@@ -1,8 +1,15 @@
 # 客户端协议
 
+## 0.7.0 设备算法与信封类型
+
+RSA 设备公钥必须为单个规范 SPKI PEM，2048 位、指数 65537；签名使用 PSS、SHA-256、MGF1-SHA256、32 字节盐及无填充 base64url。Ed25519 行为保持兼容，算法由已登记公钥选择。`signChallenge` 支持这两种设备私钥，许可证验证用 `normalizeDevicePublicKey` 校验预期设备指纹。
+
+服务端信封仍固定 EdDSA/Ed25519，不能以设备 RSA 密钥替代信任根。`plk-license`、`plk-distribution`、`plk-operation` 与 `plk-tpm-upgrade-cancel` 分别校验 type；操作字段、一次性消费及取消流程由宿主定义和校验。RSA 签名通过只证明持钥，不证明硬件来源。
+
+
 ## 密钥
 
-服务器签名密钥和每个客户端的设备密钥是独立的 Ed25519 密钥对。没有所有客户端共用的签名秘密。服务端仅保存设备公钥。Node SDK 是参考实现，生产本地应用需自行选择平台安全密钥存储和恢复策略；首版不包含 Windows TPM 适配器。
+服务器签名密钥使用 Ed25519；客户端设备密钥独立，支持 Ed25519 或 RSA-2048/PSS-SHA256。没有所有客户端共用的签名秘密。服务端仅保存设备公钥。Node SDK 是参考实现，生产本地应用需自行选择平台安全密钥存储和恢复策略；首版不包含 Windows TPM 适配器。
 
 公钥交换使用 PEM 包装的 SPKI。公钥指纹为 SPKI DER 字节的 SHA-256 小写十六进制。硬件 digest 与公钥指纹是不同概念。
 
@@ -14,7 +21,7 @@
 ["product-license-kit",1,kind,challengeId,accountId,payload,randomNonce]
 ```
 
-客户端必须对收到的 message **原始 UTF-8 字节**进行 Ed25519 签名，不重新格式化 JSON。签名使用无填充 base64url。协议版本和 kind 必须符合当前交互；只为可信服务器和用户主动发起的操作签名。不要跨产品无条件复用同一设备私钥。
+客户端必须对收到的 message **原始 UTF-8 字节**按设备公钥类型进行签名，不重新格式化 JSON。签名使用无填充 base64url。协议版本和 kind 必须符合当前交互；只为可信服务器和用户主动发起的操作签名。不要跨产品无条件复用同一设备私钥。
 
 激活挑战通过用户会话申请，payload 固定设备组、公钥及指纹。授权挑战固定设备、收费版本和绑定代次。挑战只能消费一次，服务器时间决定有效期。
 
@@ -31,6 +38,8 @@
   "sub": "internal-account-id",
   "edition": "edition-id",
   "device": "device-id",
+  "channel": "stable",
+  "fingerprint": {"schema": "product-hwid-v1", "digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"},
   "keyThumbprint": "sha256-of-device-spki",
   "generation": 1,
   "ownership": "perpetual",
@@ -40,7 +49,7 @@
 }
 ```
 
-客户端同时校验签名、算法、type、kid、issuer、产品、版本、账号、设备、公钥指纹和时间范围。验签公钥必须由已信任的产品配置或受保护的更新链预置。不能从与许可证相同的任意响应中取一个新公钥就直接信任。
+客户端同时校验签名、算法、type、kid、issuer、产品、版本、账号、设备、渠道、硬件摘要、公钥指纹和时间范围。验签公钥必须由已信任的产品配置或受保护的更新链预置。不能从与许可证相同的任意响应中取一个新公钥就直接信任。
 
 默认无时钟偏移宽限；时钟错误应提示联网校时。恶意回拨本地时钟和修改客户端不能仅靠本地验证解决。高价值的服务端功能仍应在服务端授权。
 
