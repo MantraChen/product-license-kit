@@ -1,5 +1,7 @@
 # 适配器接入
 
+文档分工核对：2026-11-16。本页负责身份、付款、通知和文件适配；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#5-分发通知与迁移)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
+
 ## 0.7.0 商品与渠道接入
 
 `edition` 商品可设置 `channel: beta`，一次购买目标 Stable 与 Beta；`channel` 商品须设置 `channel: beta`，要求已有目标 Stable；`upgrade` 可设置目标 `channel: beta`，并以 `requiresChannel: beta` 要求来源版本 Beta。省略 channel 保持 Stable 行为。
