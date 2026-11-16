@@ -200,9 +200,10 @@ def main():
     field.set(qn('w:instr'), 'PAGE')
     footer._p.append(field)
     footer.add_run(' 页')
+    pending_break = False
     for kind, value in blocks:
         if kind == 'break':
-            doc.add_page_break()
+            pending_break = True
         elif kind == 'table':
             table_block(doc, value)
         else:
@@ -211,6 +212,9 @@ def main():
                 p = doc.add_paragraph(style={1: 'Title', 2: 'Heading 1', 3: 'Heading 2'}[level])
             else:
                 p = doc.add_paragraph()
+            if pending_break:
+                p.paragraph_format.page_break_before = True
+                pending_break = False
             write_text(p, value)
     props = doc.core_properties
     props.title = blocks[0][1][1]

@@ -1,5 +1,7 @@
 # HTTP API v1
 
+文档分工核对：2026-11-16。本页负责HTTP 字段、认证与响应；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#1-角色输入与权限)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
+
 ## 0.7.0 商品兼容说明
 
 目录 `offers.kind` 支持 edition、upgrade、channel、rebind；`channel` 与 `requiresChannel` 的可选值为 beta。HTTP 路由保持不变，新增商品仍走原下单和核款接口。库方法 `bestUpgradeOffer` 新增可选第三参数 stable/beta，默认 stable。具体资格与付款来源规则见 [接入指南](INTEGRATION.md)。
