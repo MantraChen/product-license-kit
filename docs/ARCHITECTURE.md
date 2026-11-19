@@ -6,11 +6,13 @@
 
 更新：2026-11-12，源码 0.7.0。宿主既可调用进程内 `Framework`，也可使用独立 HTTP 参考服务；EXAMBIA 采用前者，共享产品数据库事务。框架不要求宿主另起授权进程。
 
-框架负责目录与商品校验、订单快照、永久权益、渠道、设备组和签名记录；宿主负责用户交互、MFA、平台成员核实、实际支付和文件交付。平台移组是否撤回权益由宿主策略决定；`importEntitlement` 不自动恢复撤销，可信宿主可通过带原因及幂等键的 `setEntitlementAccess` 显式调整。
+框架负责目录与商品校验、订单快照、永久权益、渠道、设备组和签名记录；宿主负责产品交互策略、平台成员核实、实际支付和文件交付；通用浏览器 Cookie／MFA／具名后台可选用独立 PostgresPortal，私信菜单、按钮验证和注册交接可选用 PostgresKookBot。平台移组是否撤回权益由宿主策略决定；`importEntitlement` 不自动恢复撤销，可信宿主可通过带原因及幂等键的 `setEntitlementAccess` 显式调整。
 
 设备身份支持 Ed25519 或 RSA-2048/PSS-SHA256。服务器许可证、分发、操作与升级取消信封仍为 Ed25519，并隔离 `typ`。硬件证明和实时吊销策略由宿主实现。
 
 SQLite `DatabaseSync` 同步执行，当前单 API、单通知 worker 的部署边界不变。增加数据库 busy timeout 不能替代多实例任务协调。
+
+2026-11-18 新增独立 AsyncStore／PostgresStore 及 AsyncFramework，采用回调显式传入的事务 unit、保存点和 SERIALIZABLE；读写使用真正的异步驱动。AsyncFramework 的全部业务操作与现有 HTTP 接口接线，并与同步实现共用契约验证。宿主事务使用 framework.using(unit)；外部身份验证与消息发送禁止进入该事务。详情见 [PostgreSQL](POSTGRESQL.md)。EXAMBIA 仍使用同步 Framework，上述产品运行边界继续有效。
 
 
 ## 范围
@@ -71,7 +73,7 @@ Beta 资格包含同版本普通版，普通版权益不含 Beta，升级不继�
 
 ## 事务通知
 
-关键操作和 outbox 写入同一事务，消息失败不回滚付款或权益。`dispatchNotifications` 是单 worker、至少一次投递，崩溃重试可能重复通知。适配器可按事件 ID 去重；KOOK 接口不保证此类去重。多 worker 部署需增加持久任务租约和退避；不要并发调用当前参考 dispatcher。
+关键操作和 outbox 写入同一事务，消息失败不回滚付款或权益。同步 Framework 的 `dispatchNotifications` 是单 worker、至少一次投递，崩溃重试可能重复通知；不要并发调用。AsyncFramework 另使用 PostgreSQL 持久租约、递增 generation、心跳及退避，sending 结果不明转为 uncertain，禁止自动重发。接收回执、任务完成及 outbox 回执在同一事务提交，人工核销另记操作员和原因。外部恰好一次仍需平台幂等支持，KOOK 不保证；详见 [多节点协调](COORDINATION.md)。
 
 ## 身份恢复
 

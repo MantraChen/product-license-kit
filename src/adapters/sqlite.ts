@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { privateDirectory, protectPrivatePath } from '../security/private-storage.js';
+import { assertSqliteNotCutOver } from '../security/sqlite-cutover.js';
 
 /** Snapshot an existing database without running application migrations first. */
 export function backupDatabase(source: string, destination: string): void {
@@ -17,6 +18,7 @@ export class SqliteStore {
   private readonly db: DatabaseSync;
   private depth = 0;
   constructor(path: string) {
+    assertSqliteNotCutOver(path);
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
     this.db.exec(`
@@ -67,6 +69,9 @@ export class SqliteStore {
         manifest TEXT, created_at INTEGER NOT NULL, finalized_at INTEGER);
       CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
       CREATE INDEX IF NOT EXISTS orders_account ON orders(account_id, created_at);
+      CREATE INDEX IF NOT EXISTS orders_account_cursor ON orders(account_id, created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS audit_cursor ON audit(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS distributions_account_cursor ON distributions(account_id, created_at DESC, id DESC) WHERE finalized_at IS NOT NULL;
       CREATE INDEX IF NOT EXISTS challenges_expiry ON challenges(expires_at);
       CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(delivered_at, created_at);
     `);
@@ -119,6 +124,27 @@ export class SqliteStore {
         status TEXT NOT NULL CHECK(status IN ('pending','applied','refunded')), created_at INTEGER NOT NULL,
         resolved_at INTEGER, resolution TEXT, UNIQUE(method,reference));
         INSERT OR IGNORE INTO plk_migrations VALUES(6, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS outbox_resources (
+        event_id TEXT PRIMARY KEY REFERENCES outbox(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK(kind IN ('account','order','entitlement','device','distribution')),
+        resource_id TEXT NOT NULL CHECK(length(resource_id) BETWEEN 1 AND 128));
+        INSERT OR IGNORE INTO plk_migrations VALUES(7, CAST(strftime('%s','now') AS INTEGER)*1000);`);
+    });
+    this.transaction(() => {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS task_jobs(
+        id TEXT PRIMARY KEY,namespace TEXT NOT NULL,task_key TEXT NOT NULL,payload TEXT NOT NULL,input_hash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','leased','sending','succeeded','uncertain','dead','expired','cancelled')),
+        attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL,generation INTEGER NOT NULL DEFAULT 0,
+        lease_token TEXT,lease_until INTEGER,next_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,last_error TEXT,result TEXT,resolution TEXT,
+        UNIQUE(namespace,task_key),CHECK((state IN ('leased','sending'))=(lease_token IS NOT NULL AND lease_until IS NOT NULL)));
+        CREATE INDEX IF NOT EXISTS task_jobs_due ON task_jobs(namespace,next_at,created_at,id) WHERE state IN ('pending','leased');
+        CREATE TABLE IF NOT EXISTS task_job_reviews(task_id TEXT NOT NULL REFERENCES task_jobs(id),generation INTEGER NOT NULL,
+          actor TEXT NOT NULL,outcome TEXT NOT NULL,reason TEXT NOT NULL,result_hash TEXT NOT NULL,created_at INTEGER NOT NULL,
+          PRIMARY KEY(task_id,generation));
+        INSERT OR IGNORE INTO plk_migrations VALUES(8, CAST(strftime('%s','now') AS INTEGER)*1000);`);
     });
   }
   get<T>(sql: string, ...params: SQLInputValue[]): T | undefined {

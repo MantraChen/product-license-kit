@@ -58,8 +58,25 @@ export interface IdentityProvider {
 }
 export interface Notification {
   id: string; topic: string; accountId: string; createdAt: number;
+  resource?: NotificationResource;
 }
+export const notificationResourceSchema = z.object({
+  kind: z.enum(['account', 'order', 'entitlement', 'device', 'distribution']),
+  id: z.string().min(1).max(128),
+}).strict();
+export type NotificationResource = z.infer<typeof notificationResourceSchema>;
 export interface NotificationSink { send(event: Notification, identity: VerifiedIdentity): Promise<void> }
+/** Only use when the receiving platform definitively rejected the message before accepting it. */
+export class NotificationNotSentError extends Error {
+  constructor(readonly code = 'NOTIFICATION_REJECTED') {
+    super(code); requireThat(/^[A-Z][A-Z0-9_]{2,79}$/.test(code), 'INVALID_NOTIFICATION_ERROR');
+  }
+}
+
+export interface CursorPage<T> {
+  items: T[];
+  nextCursor: string | null;
+}
 
 /** UTC offset is explicit: no dependency on the host's timezone; month ends clamp. */
 export function addCalendarMonths(epochMs: number, months: number, utcOffsetMinutes: number): number {

@@ -1,5 +1,7 @@
 # Product License Kit
 
+PostgreSQL 部署可用 `pnpm start:postgres` 启动带共享限流、节点就绪证明及指定签名计划的参考服务。私有配置、加密备份和空 schema 恢复步骤见 [PostgreSQL 签名轮换](docs/POSTGRES-SIGNING.md)；默认自动执行关闭，不改变 SQLite 产品部署。
+
 ## 2026-11-16 框架文档基线
 
 当前文档按源码 0.7.0 复核；接口输入、状态转移、失败及重试规则见 [详细契约](docs/CONTRACTS.md)，文档分工与核对范围见 [文档导航](docs/README.md)。源码与协议版本未因本文更新而改变。
@@ -32,7 +34,11 @@ EXAMBIA 的 WPF/WebView2、TPM 证明/UAC、KOOK 实时身份组、个人 EXE �
 | 通知 | 事务 outbox、失败可重试、可选 KOOK 私信适配器 |
 | 管理 | 独立管理员 API、身份变更、赠送次数、撤销权益、审计记录 |
 
-浏览器门户、OAuth 跳转回调、KOOK 按钮/Webhook、商户自动到账、Windows TPM/HWID 收集、EXE 水印与 Authenticode 签名、对象存储下载尚未内置。分发演示使用带标记的 JavaScript 文件，不能把它当作已实现的 EXE 防破解器。
+浏览器门户、OAuth 回调、MFA 与具名后台可通过可选的 PostgreSQL 门户适配层接入，见 docs/PORTAL.md；通用 KOOK 私信菜单、购买按钮、一次性网页注册和通知调度见 [Bot 适配](docs/BOT.md)。商户自动到账、Windows TPM 证明、EXE 水印与 Authenticode 签名、对象存储下载仍由相应适配器或宿主提供。分发演示使用带标记的 JavaScript 文件，不能把它当作已实现的 EXE 防破解器。
+
+2026-11-18 工作区新增 [C#／Rust SDK](clients/README.md)，包括 Windows CurrentUser DPAPI 软件身份、SMBIOS 摘要、范围绑定的挑战签名及许可证／分发清单验签。两种语言完成真实本机 HTTP 联调及 DPAPI 双向互读；这些是独立 SDK 源码，未发布包，也不替换 EXAMBIA 的 TPM 产品协议。
+
+工作区另提供 [异步业务与 PostgreSQL](docs/POSTGRESQL.md)：AsyncFramework 覆盖账号、订单、权益、设备、分发、审计与通知，现有 HTTP 接口兼容异步实现。SQLite／PostgreSQL 共用业务契约，并通过真实数据库并发及 C#／Rust HTTP 验证。另提供 [共享限流、持久任务与通知核销](docs/COORDINATION.md)，通过独立进程及回环接收器验证。原 Framework 保留同步 SQLite API；EXAMBIA 产品尚未切换数据库。
 
 设备 RSA 仅接受 2048 位、指数 65537、SHA-256/MGF1-SHA256、32 字节 PSS 盐；公钥必须是单一规范 SPKI，签名使用规范无填充 base64url。算法由保存的公钥决定，客户端不能另选降级算法。RSA 支持不代表已验证 TPM，硬件证明须由上层单独实现。服务端许可证、分发和执行凭据仍只接受 Ed25519 签名。
 
@@ -69,7 +75,7 @@ pnpm start
 1. 在 `examples/catalog.json` 的副本中定义产品、收费版本、固定升级价和设备组，设置 `CATALOG_PATH`。金额使用最小货币单位的整数；示例价格仅为测试数据。
 2. 决定哪些产品共用设备组。相同组意味着共享一台设备、冷却时间和额外次数；不同组互不影响。
 3. 实现 `IdentityProvider.verify`，验证平台凭据后返回稳定用户 ID。不能把用户自己提交的 ID 当作验证结果。
-4. 在客户端安全保存设备私钥，接入设备挑战、授权申请与许可证验签。Node 参考 SDK 位于 `src/sdk/`，其他语言按 [协议说明](docs/PROTOCOL.md) 实现。
+4. 在客户端安全保存设备私钥，接入设备挑战、授权申请与许可证验签。Node 参考 SDK 位于 `src/sdk/`，C#／Rust 源码与接入步骤见 [原生 SDK](clients/README.md)，签名契约见 [协议说明](docs/PROTOCOL.md)。
 5. 为实际文件类型实现个性化、平台签名和下载服务。调用分发预留与确认 API，登记最终文件哈希。
 
 框架核心没有硬编码任何产品名称、KOOK ID、银行账户、支付密钥或硬件序列号。KOOK 是可选适配器，收费策略与设备组策略由部署方配置。
@@ -108,3 +114,7 @@ Required Notice: Copyright 2026 MantraChen (https://github.com/MantraChen)
 ### Optional Beta channel orders
 
 Offers may specify `channel: "beta"`. The `channel` offer kind requires existing Stable ownership of the target edition. Upgrade offers may specify `requiresChannel: "beta"` to require source Beta access. `bestUpgradeOffer(accountId, editionId, channel)` defaults to Stable and selects only matching target-channel offers with verified prerequisites. Beta access includes Stable, and payment rechecks prerequisites in the fulfillment transaction. Same-edition top-ups preserve the original Stable order provenance. Old catalogs and order snapshots without channel fields retain Stable semantics; no database migration is required.
+
+SQLite v6/v7/v8 离线兼容迁移入口、停机保护及中断核查见 [迁移说明](docs/SQLITE-POSTGRES.md)。产品及 V5 数据不在此导入范围。
+
+可选的 PostgreSQL 用户中心、独立管理端、OAuth、MFA 与明确换绑流程见 [门户部署](docs/PORTAL.md)。
