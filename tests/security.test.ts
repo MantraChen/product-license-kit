@@ -171,7 +171,9 @@ test('additive migrations preserve legacy accounts and are idempotent', () => {
     INSERT INTO orders VALUES('old-order','legacy','{}','paid',1,1,'manual-bank','old-reference');
     CREATE TABLE entitlements(account_id TEXT NOT NULL REFERENCES accounts(id),edition_id TEXT NOT NULL,
       order_id TEXT NOT NULL REFERENCES orders(id),active INTEGER NOT NULL,PRIMARY KEY(account_id,edition_id));
-    INSERT INTO entitlements VALUES('legacy','tool-1','old-order',1);`);
+    INSERT INTO entitlements VALUES('legacy','tool-1','old-order',1);
+    CREATE TABLE outbox(id TEXT PRIMARY KEY,topic TEXT NOT NULL,account_id TEXT NOT NULL REFERENCES accounts(id),created_at INTEGER NOT NULL,delivered_at INTEGER,attempts INTEGER NOT NULL DEFAULT 0);
+    INSERT INTO outbox VALUES('legacy-event','order.fulfilled','legacy',1,NULL,3);`);
   old.close();
   backupDatabase(path, join(root, 'before-upgrade.sqlite'));
   const untouched = new DatabaseSync(join(root, 'before-upgrade.sqlite'), {readOnly:true});
@@ -184,6 +186,9 @@ test('additive migrations preserve legacy accounts and are idempotent', () => {
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=2')!.n, 1);
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=3')!.n, 1);
       assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=4')!.n, 1);
+      assert.equal(db.get<{n:number}>('SELECT count(*) AS n FROM plk_migrations WHERE version=7')!.n, 1);
+      assert.deepEqual({...db.get('SELECT * FROM outbox WHERE id=?', 'legacy-event')!}, {id:'legacy-event',topic:'order.fulfilled',account_id:'legacy',created_at:1,delivered_at:null,attempts:3});
+      assert.equal(db.get<{n:number}>('SELECT count(*) n FROM outbox_resources')!.n, 0);
       assert.equal(db.get<{order_id:string}>('SELECT order_id FROM entitlements')!.order_id, 'old-order');
       assert.equal(db.all<{name:string;notnull:number}>('PRAGMA table_info(entitlements)').find(c => c.name === 'order_id')!.notnull, 0);
       assert.equal(db.all('PRAGMA foreign_key_check').length, 0);

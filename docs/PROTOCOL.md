@@ -11,7 +11,7 @@ RSA 设备公钥必须为单个规范 SPKI PEM，2048 位、指数 65537；签�
 
 ## 密钥
 
-服务器签名密钥使用 Ed25519；客户端设备密钥独立，支持 Ed25519 或 RSA-2048/PSS-SHA256。没有所有客户端共用的签名秘密。服务端仅保存设备公钥。Node SDK 是参考实现，生产本地应用需自行选择平台安全密钥存储和恢复策略；首版不包含 Windows TPM 适配器。
+服务器签名密钥使用 Ed25519；客户端设备密钥独立，支持 Ed25519 或 RSA-2048/PSS-SHA256。没有所有客户端共用的签名秘密。服务端仅保存设备公钥。Node SDK 位于 src/sdk；工作区另提供 [C#／Rust SDK](../clients/README.md)，包含兼容的 Windows CurrentUser DPAPI 软件存储、SMBIOS 信号和范围绑定签名。宿主负责首次使用与恢复策略，SDK 不内置 Windows TPM 证明适配器。
 
 公钥交换使用 PEM 包装的 SPKI。公钥指纹为 SPKI DER 字节的 SHA-256 小写十六进制。硬件 digest 与公钥指纹是不同概念。
 
@@ -68,5 +68,7 @@ RSA 设备公钥必须为单个规范 SPKI PEM，2048 位、指数 65537；签�
 用户通过宿主或 Bearer API 预览并确认重置。服务端复查绑定代次、费用和账号状态，旧绑定停用并递增代次，失效该组未完成挑战，记录已支付的一次重新绑定。设备仍按正常 enrollment → 私钥签名 → activate 流程激活，不可用 HWID 直接获取授权。首次重绑消费待绑定状态，之后再次换机重新检查冷却与额度。
 
 ## 0.5.0 协议范围
+
+PostgreSQL 控制面另使用 `plk-signing-ready` 信封，由候选私钥签署计划、namespace、epoch、nodeId、kid、contextHash、nonce 及 validUntil。它只用于节点就绪，不是许可证、设备操作或取消回执；详情见 [签名轮换](POSTGRES-SIGNING.md)。现有客户端许可证格式不变，SDK 仍须使用预置信任并验证正确的 typ。
 
 许可证签入 channel 与 fingerprint {schema,digest}。SDK 校验明确的预期渠道（默认 stable）和必填本机摘要。Beta 资格在挑战和签发时都复核。相同密钥但不同摘要按换绑处理；这不证明硬件不可复制，原生端必须保护私钥并提供可信采集。旧 SDK 的严格字段解析与新令牌不兼容，须协调升级；服务器仍默认 15 分钟租期。

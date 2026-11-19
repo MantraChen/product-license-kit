@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import type { SQLInputValue } from 'node:sqlite';
+import { z } from 'zod';
 import { SqliteStore } from './adapters/sqlite.js';
-import { addCalendarMonths, requireThat, rebindCost, type Catalog, type IdentityProvider,
-  type NotificationSink, type Offer, type VerifiedIdentity } from './core/model.js';
+import { addCalendarMonths, requireThat, rebindCost, notificationResourceSchema, type Catalog, type IdentityProvider,
+  type CursorPage, type NotificationResource, type NotificationSink, type Offer, type VerifiedIdentity } from './core/model.js';
 import { EnvelopeSigner, normalizeDevicePublicKey, randomToken, sha256, verifyDeviceProof, type LicenseClaims } from './core/crypto.js';
 
 interface Account { id: string; provider: string; subject: string; created_at: number }
@@ -22,6 +24,13 @@ interface Distribution {
   identity_snapshot: string; artifact_sha256: string | null; manifest: string | null;
   created_at: number; finalized_at: number | null;
 }
+const pageQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  cursor: z.string().min(1).max(1024).regex(/^[A-Za-z0-9_-]+$/).optional(),
+}).strict();
+const pageCursor = z.object({
+  scope: z.string(), createdAt: z.number().int().nonnegative().safe(), id: z.string().uuid(),
+}).strict();
 export interface Fingerprint { schema: string; digest: string }
 export interface Payment { method: string; reference: string; amount: number; currency: string }
 interface PaymentException extends Payment {
@@ -67,8 +76,11 @@ export class Framework {
   private audit(actor: string, action: string, target: string, details: object = {}): void {
     this.store.run('INSERT INTO audit VALUES (?,?,?,?,?,?)', randomUUID(), actor, action, target, JSON.stringify(details), this.now());
   }
-  private event(topic: string, accountId: string): void {
-    this.store.run('INSERT INTO outbox(id,topic,account_id,created_at) VALUES (?,?,?,?)', randomUUID(), topic, accountId, this.now());
+  private event(topic: string, accountId: string, resource: NotificationResource = { kind: 'account', id: accountId }): void {
+    const target = notificationResourceSchema.parse(resource);
+    const eventId = randomUUID();
+    this.store.run('INSERT INTO outbox(id,topic,account_id,created_at) VALUES (?,?,?,?)', eventId, topic, accountId, this.now());
+    this.store.run('INSERT INTO outbox_resources VALUES(?,?,?)', eventId, target.kind, target.id);
   }
   private account(id: string): Account {
     const account = this.store.get<Account>('SELECT * FROM accounts WHERE id=?', id);
@@ -252,7 +264,7 @@ export class Framework {
       }
       if (!owned) {
         this.store.run('INSERT INTO entitlements VALUES(?,?,NULL,1)', accountId, editionId);
-        this.event('entitlement.imported', accountId);
+        this.event('entitlement.imported', accountId, { kind: 'entitlement', id: editionId });
       }
       if (evidence.betaAccess && !this.hasReleaseAccess(accountId, editionId, 'beta')) {
         this.store.run("INSERT INTO entitlement_channels VALUES(?,?,'beta')", accountId, editionId);
@@ -307,7 +319,48 @@ export class Framework {
   orders(accountId: string) {
     this.assertAccountActive(accountId);
     return this.store.all<Order>('SELECT * FROM orders WHERE account_id=? ORDER BY created_at DESC LIMIT 100', accountId)
-      .map(row => ({ id: row.id, offer: JSON.parse(row.offer_json) as Offer, ...this.orderLifecycle(row.id), createdAt: row.created_at, paidAt: row.paid_at }));
+      .map(row => this.orderView(row));
+  }
+  private orderView(row: Order) {
+    return { id: row.id, offer: JSON.parse(row.offer_json) as Offer, ...this.orderLifecycle(row.id), createdAt: row.created_at, paidAt: row.paid_at };
+  }
+  ordersPage(accountId: string, input: unknown = {}) {
+    this.assertAccountActive(accountId);
+    const page = this.pageRows<Order>('orders', accountId, input);
+    return { ...page, items: page.items.map(row => this.orderView(row)) };
+  }
+  private pageRows<T extends { id: string; created_at: number }>(
+    table: 'orders' | 'audit' | 'distributions', accountId: string | undefined, input: unknown,
+  ): CursorPage<T> {
+    const query = pageQuery.parse(input);
+    const scope = JSON.stringify([table, accountId ?? null]);
+    const clauses: string[] = [];
+    const parameters: SQLInputValue[] = [];
+    if (accountId !== undefined) {
+      clauses.push('account_id=?'); parameters.push(accountId);
+    }
+    if (table === 'distributions') {
+      clauses.push('finalized_at IS NOT NULL',
+        'EXISTS (SELECT 1 FROM entitlements e WHERE e.account_id=distributions.account_id AND e.edition_id=distributions.edition_id AND e.active=1)');
+    }
+    if (query.cursor) {
+      let cursor: z.infer<typeof pageCursor>;
+      try {
+        cursor = pageCursor.parse(JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8')));
+        requireThat(cursor.scope === scope, 'INVALID_PAGE_CURSOR');
+      } catch { requireThat(false, 'INVALID_PAGE_CURSOR'); }
+      clauses.push('(created_at<? OR (created_at=? AND id<?))');
+      parameters.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
+    const rows = this.store.all<T>(
+      `SELECT * FROM ${table} WHERE ${clauses.length ? clauses.join(' AND ') : '1=1'} ORDER BY created_at DESC,id DESC LIMIT ?`,
+      ...parameters, query.limit + 1,
+    );
+    const items = rows.slice(0, query.limit);
+    const last = items.at(-1);
+    const nextCursor = rows.length > query.limit && last
+      ? Buffer.from(JSON.stringify({ scope, createdAt: last.created_at, id: last.id })).toString('base64url') : null;
+    return { items, nextCursor };
   }
   confirmPayment(orderId: string, payment: Payment, review?: { latePaymentReason: string }) {
     return this.fulfillPayment(orderId, payment, review);
@@ -344,7 +397,7 @@ export class Framework {
       this.store.run('UPDATE orders SET status=?,paid_at=?,payment_method=?,payment_reference=? WHERE id=?',
         'paid', this.now(), payment.method, payment.reference, orderId);
       this.audit('admin', 'payment.confirmed', orderId, { method: payment.method, amount: payment.amount, currency: payment.currency, ...(lifecycle.status === 'expired' ? {latePaymentReason: review!.latePaymentReason.trim()} : {}) });
-      this.event('order.fulfilled', order.account_id);
+      this.event('order.fulfilled', order.account_id, { kind: 'order', id: orderId });
       return { orderId, status: 'paid', replayed: false };
     });
   }
@@ -440,7 +493,7 @@ export class Framework {
       this.store.run('DELETE FROM entitlement_channels WHERE account_id=? AND edition_id=?', accountId, editionId);
       if (access === 'beta') this.store.run("INSERT INTO entitlement_channels VALUES(?,?,'beta')", accountId, editionId);
       this.audit('admin', 'entitlement.access-set', accountId, { editionId, access, reason });
-      this.event('entitlement.updated', accountId);
+      this.event('entitlement.updated', accountId, { kind: 'entitlement', id: editionId });
       return { editionId, access };
     });
   }
@@ -450,7 +503,7 @@ export class Framework {
       this.store.run('UPDATE entitlements SET active=0 WHERE account_id=? AND edition_id=?', accountId, editionId);
       this.store.run('DELETE FROM entitlement_channels WHERE account_id=? AND edition_id=?', accountId, editionId);
       this.audit('admin', 'entitlement.revoked', accountId, { editionId, reason });
-      this.event('entitlement.revoked', accountId);
+      this.event('entitlement.revoked', accountId, { kind: 'entitlement', id: editionId });
     });
   }
   /** Preview never spends a credit; callers must confirm the observed generation and cost. */
@@ -485,7 +538,7 @@ export class Framework {
         ((kind='enroll' AND json_extract(payload,'$.groupId')=?) OR (kind='license' AND json_extract(payload,'$.deviceId')=?))`,
         this.now(), accountId, groupId, binding.device_id);
       this.audit(accountId, 'device.reset', binding.device_id, { groupId, cost: state.cost, generation, freeAt });
-      this.event('device.reset', accountId);
+      this.event('device.reset', accountId, { kind: 'device', id: binding.device_id });
       return { groupId, generation, freeAt, cost: state.cost, credits: this.credits(accountId, groupId) };
     });
   }
@@ -537,7 +590,7 @@ export class Framework {
       this.store.run('DELETE FROM binding_resets WHERE account_id=? AND group_id=?', accountId, group.id);
       this.store.run('UPDATE challenges SET used_at=? WHERE id=?', this.now(), challengeId);
       this.audit(accountId, 'device.activated', deviceId, { groupId: group.id, cost, generation, freeAt, previousDevice: previous?.device_id ?? null });
-      this.event('device.activated', accountId);
+      this.event('device.activated', accountId, { kind: 'device', id: deviceId });
       return { deviceId, groupId: group.id, keyThumbprint: payload.thumbprint, generation, freeAt, cost };
     });
   }
@@ -597,15 +650,20 @@ export class Framework {
       const manifest = this.signer.sign({ distributionId: row.id, editionId: row.edition_id,
         releaseId: row.release_id, sha256: artifactSha256, issuedAt: this.now() }, 'plk-distribution');
       this.store.run('UPDATE distributions SET artifact_sha256=?,manifest=?,finalized_at=? WHERE id=?', artifactSha256, manifest, this.now(), id);
-      this.audit('admin', 'distribution.finalized', id, { artifactSha256 }); this.event('distribution.ready', row.account_id);
+      this.audit('admin', 'distribution.finalized', id, { artifactSha256 }); this.event('distribution.ready', row.account_id, { kind: 'distribution', id: row.id });
       return { manifest };
     });
   }
   distributions(accountId: string) {
+    return this.distributionsPage(accountId, { limit: 100 }).items;
+  }
+  private distributionView(row: Distribution) {
+    return { id: row.id, editionId: row.edition_id, releaseId: row.release_id, manifest: row.manifest, sha256: row.artifact_sha256 };
+  }
+  distributionsPage(accountId: string, input: unknown = {}) {
     this.assertAccountActive(accountId);
-    return this.store.all<Distribution>('SELECT * FROM distributions WHERE account_id=? AND finalized_at IS NOT NULL ORDER BY created_at DESC LIMIT 100', accountId)
-      .filter(row => this.owns(accountId, row.edition_id))
-      .map(row => ({ id: row.id, editionId: row.edition_id, releaseId: row.release_id, manifest: row.manifest, sha256: row.artifact_sha256 }));
+    const page = this.pageRows<Distribution>('distributions', accountId, input);
+    return { ...page, items: page.items.map(row => this.distributionView(row)) };
   }
   traceDistribution(id: string) {
     const row = this.store.get<Distribution>('SELECT * FROM distributions WHERE id=?', id);
@@ -613,14 +671,19 @@ export class Framework {
   }
   /** Single-worker, at-least-once outbox. Sinks should deduplicate by event.id where supported. */
   async dispatchNotifications(sink: NotificationSink, limit = 20): Promise<{ delivered: number; failed: number }> {
-    const rows = this.store.all<{ id: string; topic: string; account_id: string; created_at: number }>(
-      'SELECT * FROM outbox WHERE delivered_at IS NULL ORDER BY created_at,id LIMIT ?', limit);
+    requireThat(Number.isInteger(limit) && limit >= 1 && limit <= 100, 'INVALID_NOTIFICATION_LIMIT');
+    const rows = this.store.all<{ id: string; topic: string; account_id: string; created_at: number; resource_kind: string | null; resource_id: string | null }>(
+      `SELECT o.*,r.kind AS resource_kind,r.resource_id FROM outbox o LEFT JOIN outbox_resources r ON r.event_id=o.id
+       WHERE o.delivered_at IS NULL ORDER BY o.created_at,o.id LIMIT ?`, limit);
     let delivered = 0; let failed = 0;
     for (const row of rows) {
       const account = this.account(row.account_id);
       this.store.run('UPDATE outbox SET attempts=attempts+1 WHERE id=?', row.id);
       try {
-        await sink.send({ id: row.id, topic: row.topic, accountId: account.id, createdAt: row.created_at },
+        const resource = row.resource_kind === null ? undefined
+          : notificationResourceSchema.parse({ kind: row.resource_kind, id: row.resource_id });
+        await sink.send({ id: row.id, topic: row.topic, accountId: account.id, createdAt: row.created_at,
+          ...(resource ? { resource } : {}) },
           { provider: account.provider, subject: account.subject });
         this.store.run('UPDATE outbox SET delivered_at=? WHERE id=?', this.now(), row.id); delivered++;
       } catch { failed++; }
@@ -628,6 +691,9 @@ export class Framework {
     return { delivered, failed };
   }
   auditLog() { return this.store.all('SELECT * FROM audit ORDER BY created_at DESC,id DESC LIMIT 100'); }
+  auditPage(input: unknown = {}) {
+    return this.pageRows<{ id: string; actor: string; action: string; target: string; details: string; created_at: number }>('audit', undefined, input);
+  }
   cleanupExpired(): void {
     this.expireOrders();
     this.store.transaction(() => {

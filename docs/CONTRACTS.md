@@ -4,7 +4,7 @@
 
 ## 1. 角色、输入与权限
 
-HTTP 用户接口使用普通 Bearer 会话；管理员使用独立管理令牌。用户身份不等于管理员权限，管理员令牌也不能冒充用户会话。浏览器门户必须由自己的同源后端隔离管理令牌；框架不提供产品级 Cookie、MFA 或 Bot 按钮身份校验。
+HTTP 用户接口使用普通 Bearer 会话；管理员使用独立管理令牌。用户身份不等于管理员权限，管理员令牌也不能冒充用户会话。浏览器门户必须通过同源后端隔离管理令牌；可选的 PostgresPortal／createPortalApp 已提供通用 Cookie、MFA 与具名权限。PostgresKookBot 提供私信按钮与原卡片归属校验，产品身份组政策由宿主配置，见 [Bot 契约](BOT.md)。
 
 JSON 请求上限 16 KiB，路由采用严格字段校验。400 先检查输入，401 核实当前认证材料，403 检查账号状态和权限，409 重新读取业务状态，429 退避。相同 Idempotency-Key、操作、账号和载荷重放原结果，同键不同载荷拒绝；响应丢失不能换新键盲目再做一次扣费操作。
 
@@ -36,7 +36,9 @@ GET /v1/devices/:groupId/reset 返回 state、generation、freeAt、credits、co
 
 reserve → finalizeDistribution 的分发流程分别确定归属与最终文件哈希。finalize 后不可换内容；同一分发提交不同哈希拒绝。签名清单不包含可公开泄露的管理员或客户认证秘密。示例 JavaScript 分发不是 Windows EXE 工厂或 Authenticode。
 
-业务事务写 outbox 并不代表消息已经送达。宿主配置通知适配器并主动 drainOutbox；失败保留待投递和尝试次数，须自行安排退避、幂等、过期及告警。重发历史事件前核对主题与业务结果，避免重复通知已经完成的业务。
+业务事务将事件写入 outbox。同步 Framework 由宿主通过单个 worker 调用 `framework.dispatchNotifications(sink)`，失败保留待投递记录和尝试次数。AsyncFramework 的新事件另在原业务事务中创建 PostgreSQL 通知任务，使用多进程租约、心跳、退避及 generation；发送结果不明进入核销，不自动重发。核销、审计与确认回执同时提交，宿主负责验证操作员和平台证据。详见 [多节点协调](COORDINATION.md)。旧 outbox 不自动补任务，重发历史事件前核对主题与业务结果，避免重复通知已经完成的业务。
+
+工作区迁移 7 新增 `outbox_resources`，与原事件在同一业务事务中写入资源类型和 ID。付款事件关联实际订单，分发事件关联实际分发，权益事件关联版本，设备事件关联实际设备；其余框架事件关联账号。`Notification.resource` 是可选字段，旧事件不补猜订单关系。消费器应按资源 ID 重新核对归属和当前状态，不能把资源引用当作身份凭据。投递批量限制为 1–100，默认 20；该方法仍不提供网络平台的恰好一次保证或多 worker 租约。
 
 当前使用同步 SQLite 与事务；迁移版本由 plk_migrations 管理。升级前一致性备份，恢复到新目录检查完整性、权益、付款及绑定。不支持把运行中的单个数据库主文件直接当作一致性快照。文件密钥、数据库和恢复口令分别保护；框架不能自动提供 PostgreSQL、多节点任务租约或分布式限流。
 
@@ -44,4 +46,4 @@ reserve → finalizeDistribution 的分发流程分别确定归属与最终文�
 
 运行 pnpm check、pnpm demo、pnpm audit:source 和生产依赖审计；文档 Markdown/Word 同步检查不替代视觉渲染。远端 CI 未启动、被计费阻止或网络失败应分别记录，不记为测试通过。提交源码和文档不等于部署宿主或发布 npm 版本。
 
-用户门户、MFA、完整 Bot 交互、支付商户、硬件采集、TPM 证明、Windows 执行、对象存储和安装包分发属于宿主接入，不因某产品实现而变成框架内置。API.md、PROTOCOL.md 与 INTEGRATION.md 分别拥有字段、签名和适配边界的解释权。
+可选通用用户门户和 MFA 见 PORTAL.md，KOOK 私信交互见 BOT.md；其他 Bot 平台、支付商户、硬件采集、TPM 证明、Windows 执行、对象存储和安装包分发仍属于相应适配器／宿主接入，不因某产品实现而变成授权核心内置。API.md、PROTOCOL.md 与 INTEGRATION.md 分别拥有字段、签名和适配边界的解释权。

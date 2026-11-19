@@ -15,4 +15,7 @@ dist/
 *.log
 artifacts/
 coverage/
+**/bin/
+**/obj/
+**/target/
 .DS_Store

@@ -11,6 +11,8 @@
 
 本接口供客户端和服务端调用。不接受带 Origin 的浏览器请求，不使用 Cookie，也不开放跨域。门户应通过自己的同源后端接入，不要把管理员凭据传给浏览器。
 
+`createApp` 同时接收同步 Framework 和异步 AsyncFramework；响应数据格式一致，身份验证及写入都等待完成。异步仓储不可用返回 503 `STORAGE_UNAVAILABLE`；已回滚且允许重试的冲突带 `retryable:true` 和 `Retry-After:1`。提交／自动提交回执不明分别返回 `TRANSACTION_COMMIT_UNCERTAIN`／`POSTGRES_RESULT_UNCERTAIN`，`retryable:false`，须按业务记录核实结果。详见 [PostgreSQL](POSTGRESQL.md)。
+
 ## 认证
 
 普通用户：`Authorization: Bearer <session.accessToken>`。管理员：相同 Header 形式，使用私有 `.env` 中独立生成的 `ADMIN_TOKEN`。管理员令牌不能替代普通用户身份，用户会话也不能访问管理端。
@@ -30,21 +32,27 @@
 | `POST /v1/auth/login` | `{provider, proof}` → 同上 |
 | `POST /v1/auth/logout` | 用户认证；撤销当前会话 |
 
-注册票据由后台发放并绑定外部身份。`proof` 对 KOOK 为 OAuth access token，对本地开发适配器为本地生成的随机凭据。用户 ID 参数不是身份凭据。真实浏览器 OAuth 授权码交换与 state/PKCE 处理由门户适配器实现，未在本服务中内置。
+注册票据由后台发放并绑定外部身份。`proof` 对 KOOK 为 OAuth access token，对本地开发适配器为本地生成的随机凭据。门户可使用 KookOAuthClient，在保存、验证并消费浏览器绑定的 state 后，调用 exchange(code) 取得平台 token，再通过现有 KookIdentityProvider 和框架注册／登录入口核实身份。平台 token 保存在服务端调用链中。需要直接接入宿主认证时可使用 verify(code) 取得已核实身份。authorizationUrl(state) 仅请求 get_user_info，平台请求来源固定，适配按 KOOK 公开的 confidential-client 授权码协议执行。浏览器会话、MFA 和操作员策略由门户管理。参考 [KOOK OAuth](https://developer.kookapp.cn/doc/oauth2) 和 [授权码交换](https://developer.kookapp.cn/doc/http/oauth)。
 
 ## 用户接口
+
+库通知接口 `framework.dispatchNotifications(sink, limit = 20)` 接受 1–100 的整数批量。`sink.send(event, identity)` 中，事件为 `{id,topic,accountId,createdAt,resource?}`；新框架事件的 `resource` 为 `{kind,id}`，kind 可为 account、order、entitlement、device、distribution。付款的 order 资源精确引用本次订单，distribution 资源精确引用本次已完成分发。旧库事件缺少资源时继续省略该字段，不按时间、账号最近订单或主题猜测。资源引用不包含下载凭据、支付流水、密钥或签名清单；接收者仍须重新验证资源归属与当前状态。
+
+同步 Framework 继续采用单 worker、至少一次通知语义。AsyncFramework 已接入 PostgreSQL 多进程租约、心跳和退避；普通发送异常进入结果不明核销，仅明确未接收的 NotificationNotSentError 自动退避。详见 [任务与通知协调](COORDINATION.md)。HTTP 共享预算通过 createApp 的 sharedRateLimiter 显式接入，不配置时仍是本机内存限流。
 
 | 方法及路径 | 请求 / 结果 |
 | --- | --- |
 | `GET /v1/me` | 当前账号、版本权益、设备绑定、额外次数 |
-| `GET /v1/orders` | 最近 100 条本账号订单 |
+| `GET /v1/orders` | 无查询参数时返回最近 100 条本账号订单；设置 `limit=1..100` 或 `cursor` 时返回 `{items,nextCursor}`，默认每页 30 条 |
 | `POST /v1/orders` | `{offerId}`；需要幂等键；返回订单 ID 与价格快照 |
 | `POST /v1/orders/:id/cancel` | 仅可取消本账号待支付订单 |
 | `POST /v1/devices/challenges` | `{groupId, publicKey, fingerprint:{schema,digest}}`；Ed25519 或 RSA-2048/PSS-SHA256 的规范 SPKI PEM 公钥；digest 为 64 位小写十六进制 |
 | `POST /v1/devices/activate` | `{challengeId, signature}`；需要幂等键；返回设备 ID、代次、成本和下次免费时间 |
-| `GET /v1/distributions` | 最近 100 条本账号已完成且仍有权益的分发清单；不包含下载 URL |
+| `GET /v1/distributions` | 无查询参数时返回最近 100 条本账号已完成且仍有权益的分发清单；设置 `limit=1..100` 或 `cursor` 时返回 `{items,nextCursor}`，默认每页 30 条；不包含下载 URL |
 
 公钥与硬件指纹属于客户端输入。硬件指纹只作为元数据存储，不授权登录或自动恢复。激活必须由用户明确确认替换设备，再提交签名挑战。
+
+订单与分发分页按创建时间、ID 倒序，游标绑定当前账号和列表类型。将响应中的 `nextCursor` 原样传入下一页，返回 null 时结束。翻页期间新建的较新记录留待重新请求第一页。分发在分页前筛选已完成且当前仍有权益的记录，每次翻页重新核对权益与账号状态。`GET /v1/admin/audit` 使用同样的分页参数及响应，继续要求管理员认证。无查询参数的三个入口沿用数组响应。
 
 ## 设备认证接口
 
@@ -87,6 +95,10 @@
 
 createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired。默认有效期 24 小时，FrameworkOptions.orderTtlSeconds 可覆盖。cleanupExpired 同时清理过期订单。过期订单确认接口需增加 latePaymentReason（3–500 字符），仅管理 API 可用。手动取消、重复流水、错误金额、失效资格仍拒绝。
 
+## PostgreSQL 签名计划
+
+配置 `createApp(...,{signingCoordinator})` 时增加 `/v1/admin/signing` 的状态、策略初始化、指定公钥计划、带 revision 暂停及恢复核对入口。全部沿用管理员 Bearer 与浏览器 Origin 拒绝策略，不接受私钥或任意文件路径。字段及错误语义见 [签名计划接口](POSTGRES-SIGNING.md#初始化与创建计划)。异步 `/v1/signing-key` 按共享策略返回当前启用公钥；缺钥、未初始化的显式策略或部署摘要不符时为 503。
+
 ## 0.5.0 安全与异常到账接口
 
 许可证挑战接受 channel（stable / beta，省略为 stable），签发时再次校验渠道。许可证含 channel、fingerprint；新版 SDK verifyLicense 必须传入本机预期 fingerprint，不能从不可信许可证中抄取预期值。
@@ -96,3 +108,7 @@ createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired�
 ## 显式管理版本权限
 
 可信宿主方法 `setEntitlementAccess(accountId, editionId, access, reason, key)`，其中 access 为 `none`、`stable`、`beta`。仅供宿主完成管理员鉴权后调用，没有新增公开 HTTP 端点。方法允许显式恢复撤销权益，保留原订单来源；普通版会清除同版 Beta，撤销会清除所有同版渠道。请求必须包含原因和幂等键，重放旧请求不重新授予权限。平台角色同步属于产品适配器，不在核心中执行。
+
+可选浏览器服务使用独立 `createPortalApp`，同源 Cookie、MFA 和具名权限不改变本页 `/v1` 原生协议。见 [门户接口](PORTAL.md#浏览器接口)。
+
+可选 `createKookBotApp` 仅提供独立 `GET /health` 与 `POST /webhook`，接收原始 KOOK 回调，不接受管理令牌或提交账号 ID 替代平台验证。[Bot 契约](BOT.md) 说明购买、私信按钮、一次性注册与发送结果核对。门户 `/api/auth/start` 可选 `registration` 仅接受此适配器签发的身份绑定交接，最终仍需 OAuth 和 MFA；原 `/v1/register` 不接受该交接令牌。
