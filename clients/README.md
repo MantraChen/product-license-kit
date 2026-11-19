@@ -1,5 +1,7 @@
 # C# 与 Rust 客户端 SDK
 
+核对日期：2026-11-19。SDK 源码已随框架 PR #19 合入，尚未发布包。2026-11-18 的 Windows x64 本地及回环 HTTP 数量为带日期证据；未将产品 TPM 或其他系统兼容性据此标为通过。协议见 [客户端协议](../docs/PROTOCOL.md)，当前框架边界见 [演进计划](../docs/ROADMAP.md)。
+
 工作区 SDK 源码版本为 0.1.0，使用框架 0.7.0 的 `/v1/` 设备协议；未发布 NuGet 或 crates.io 包。C# 项目为 .NET 10，Rust 项目使用 Rust 1.100，依赖锁文件随源码保留。授权服务器签名固定为 Ed25519，设备支持 Ed25519 或 RSA-2048/PSS-SHA256；RSA 指数为 65537、盐长为 32 字节。
 
 两种 SDK 提供请求客户端、精确范围的挑战签名、许可证及分发清单验证、Windows 当前用户 DPAPI 软件密钥存储和 SMBIOS 摘要。C# 接受持有签名权限的 `RSA` provider；Rust 接受自有的 `rsa::PrivateKey`。TPM 证明、制造商信任、OAuth 浏览器交接和操作许可属于宿主协议，不能由 RSA 签名通过推断硬件可信。EXAMBIA 仍使用其现有 C# 产品协议与身份目录，本 SDK 不迁移或替换那些身份。

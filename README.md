@@ -2,9 +2,9 @@
 
 PostgreSQL 部署可用 `pnpm start:postgres` 启动带共享限流、节点就绪证明及指定签名计划的参考服务。私有配置、加密备份和空 schema 恢复步骤见 [PostgreSQL 签名轮换](docs/POSTGRES-SIGNING.md)；默认自动执行关闭，不改变 SQLite 产品部署。
 
-## 2026-11-16 框架文档基线
+## 2026-11-19 集成基线
 
-当前文档按源码 0.7.0 复核；接口输入、状态转移、失败及重试规则见 [详细契约](docs/CONTRACTS.md)，文档分工与核对范围见 [文档导航](docs/README.md)。源码与协议版本未因本文更新而改变。
+当前文档按 PR #19 合入的源码 0.7.0 复核；SQLite 迁移 8 与 PostgreSQL 独立迁移 1–6 已实现；接口输入、状态转移、失败及重试规则见 [详细契约](docs/CONTRACTS.md)，文档分工与核对范围见 [文档导航](docs/README.md)。源码与协议版本未因本文更新而改变。
 
 此前已将 Beta 商品与渠道报价代码纳入框架版本管理。0.7.0 为源码版本，未创建发布标签或发布 npm 包。服务端信封仍只信任 Ed25519；设备证明支持 Ed25519 与 RSA-2048/PSS-SHA256，支持 RSA 公钥不等于已验证 TPM 硬件。
 
@@ -19,7 +19,7 @@ EXAMBIA 的 WPF/WebView2、TPM 证明/UAC、KOOK 实时身份组、个人 EXE �
 
 ## 当前状态
 
-`0.7.0` 是当前源码中的 API 核心与接入参考实现；包含设备自助重置、安全维护、历史授权认领、同版 Beta 资格与最低固定升级价，包含渠道许可证、安全恢复、异常到账处理、显式权益管理、RSA-PSS 设备证明和付费 Beta 补差，未发布 npm 包。它适合非商业实验和扩展开发；生产接入还需要真实身份配置、管理端强认证、支付与交付适配器、备份及运维措施。没有附带现成的支付账户、Bot、客户数据或 Windows 产品代码。
+`0.7.0` 是当前源码中的 API 核心与接入参考实现；包含设备自助重置、安全维护、历史授权认领、同版 Beta 资格与最低固定升级价，包含渠道许可证、安全恢复、异常到账处理、显式权益管理、RSA-PSS 设备证明和付费 Beta 补差，未发布 npm 包。它适合非商业实验和扩展开发；生产接入还需要真实身份配置、管理端强认证、支付与交付适配器、备份及运维措施。没有附带真实支付账户、平台部署配置、客户数据或 Windows 产品代码；可选通用 Bot 与门户适配器需要独立配置。
 
 | 能力 | 当前实现 |
 | --- | --- |
@@ -31,14 +31,16 @@ EXAMBIA 的 WPF/WebView2、TPM 证明/UAC、KOOK 实时身份组、个人 EXE �
 | 换绑 | 按自然月冷却；成熟后免费资格不失效、不累积；付费/管理员次数 |
 | 许可证 | 服务端签名的短期设备许可证；独立客户端验签与作用域检查 |
 | 分发 | 用户分发编号、身份历史快照、最终文件哈希、签名清单、追溯查询 |
-| 通知 | 事务 outbox、失败可重试、可选 KOOK 私信适配器 |
+| 通知 | 事务 outbox 与精确资源引用；同步单 worker；异步租约、退避及结果不明核销 |
+| 存储 | 同步 SQLite；异步 PostgreSQL；游标分页；受控离线兼容导入 |
+| 门户与 Bot | 可选 PostgreSQL OAuth／MFA／具名权限门户、KOOK 私信交互与一次性注册交接 |
 | 管理 | 独立管理员 API、身份变更、赠送次数、撤销权益、审计记录 |
 
 浏览器门户、OAuth 回调、MFA 与具名后台可通过可选的 PostgreSQL 门户适配层接入，见 docs/PORTAL.md；通用 KOOK 私信菜单、购买按钮、一次性网页注册和通知调度见 [Bot 适配](docs/BOT.md)。商户自动到账、Windows TPM 证明、EXE 水印与 Authenticode 签名、对象存储下载仍由相应适配器或宿主提供。分发演示使用带标记的 JavaScript 文件，不能把它当作已实现的 EXE 防破解器。
 
-2026-11-18 工作区新增 [C#／Rust SDK](clients/README.md)，包括 Windows CurrentUser DPAPI 软件身份、SMBIOS 摘要、范围绑定的挑战签名及许可证／分发清单验签。两种语言完成真实本机 HTTP 联调及 DPAPI 双向互读；这些是独立 SDK 源码，未发布包，也不替换 EXAMBIA 的 TPM 产品协议。
+2026-11-18 已合入的源码提供 [C#／Rust SDK](clients/README.md)，包括 Windows CurrentUser DPAPI 软件身份、SMBIOS 摘要、范围绑定的挑战签名及许可证／分发清单验签。两种语言完成真实本机 HTTP 联调及 DPAPI 双向互读；这些是独立 SDK 源码，未发布包，也不替换 EXAMBIA 的 TPM 产品协议。
 
-工作区另提供 [异步业务与 PostgreSQL](docs/POSTGRESQL.md)：AsyncFramework 覆盖账号、订单、权益、设备、分发、审计与通知，现有 HTTP 接口兼容异步实现。SQLite／PostgreSQL 共用业务契约，并通过真实数据库并发及 C#／Rust HTTP 验证。另提供 [共享限流、持久任务与通知核销](docs/COORDINATION.md)，通过独立进程及回环接收器验证。原 Framework 保留同步 SQLite API；EXAMBIA 产品尚未切换数据库。
+源码另提供 [异步业务与 PostgreSQL](docs/POSTGRESQL.md)：AsyncFramework 覆盖账号、订单、权益、设备、分发、审计与通知，现有 HTTP 接口兼容异步实现。SQLite／PostgreSQL 共用业务契约，并通过真实数据库并发及 C#／Rust HTTP 验证。另提供 [共享限流、持久任务与通知核销](docs/COORDINATION.md)，通过独立进程及回环接收器验证。原 Framework 保留同步 SQLite API；EXAMBIA 产品尚未切换数据库。
 
 设备 RSA 仅接受 2048 位、指数 65537、SHA-256/MGF1-SHA256、32 字节 PSS 盐；公钥必须是单一规范 SPKI，签名使用规范无填充 base64url。算法由保存的公钥决定，客户端不能另选降级算法。RSA 支持不代表已验证 TPM，硬件证明须由上层单独实现。服务端许可证、分发和执行凭据仍只接受 Ed25519 签名。
 
@@ -84,8 +86,9 @@ pnpm start
 
 ```text
 src/core/          策略、类型、签名
-src/service.ts     事务化业务用例
-src/adapters/      SQLite、KOOK、本地开发身份
+src/service.ts     同步 SQLite 业务用例
+src/async-service.ts 异步业务入口
+src/adapters/      SQLite、PostgreSQL、协调、身份、门户及 Bot
 src/http/          API 边界、认证和输入校验
 src/sdk/           Node 客户端参考实现
 src/cli/           本地初始化
@@ -118,3 +121,7 @@ Offers may specify `channel: "beta"`. The `channel` offer kind requires existing
 SQLite v6/v7/v8 离线兼容迁移入口、停机保护及中断核查见 [迁移说明](docs/SQLITE-POSTGRES.md)。产品及 V5 数据不在此导入范围。
 
 可选的 PostgreSQL 用户中心、独立管理端、OAuth、MFA 与明确换绑流程见 [门户部署](docs/PORTAL.md)。
+
+## 当前验证与交付边界
+
+2026-11-19 合并前本地 `pnpm check` 103 项、隔离 PostgreSQL 18.7 检查 109 项、demo 和 140 文件公开源码审查通过。GitHub Actions 的 Windows／Ubuntu 作业因账号计费锁定未启动；不能记为远端通过。真实 OAuth、KOOK 消息、商户支付、生产切库、客户端信任过渡及 EXE 正式签名仍需对应环境验收。

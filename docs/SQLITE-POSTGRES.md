@@ -1,5 +1,9 @@
 # SQLite v6/v7/v8 到 PostgreSQL 的离线兼容迁移
 
+核对日期：2026-11-19。本文描述已合入 main 的源码 0.7.0，不表示已创建版本标签、发布 npm 包或完成生产部署。SQLite 当前迁移为 8；PostgreSQL 使用独立迁移 1–6、共 41 表。当前能力与外部验收边界见 [演进计划](ROADMAP.md)。
+
+此工具只导入通用框架表，不导入产品 exa_ 表或 V5 旧数据；切库和恢复必须独占写入者，不能边运行产品边迁移。
+
 工作区提供 `inspectSqliteMigration`、`migrateSqliteToPostgres`、`reviewSqliteCutover`，以及 `examples/sqlite-postgres.mjs` 操作入口。只支持本框架已知的 SQLite v6/v7/v8 精确布局；不是 EXAMBIA 产品或 V5 数据导入器。附加业务表、视图、触发器、改动的列／约束／索引、未知版本均拒绝（三个已知只读游标索引允许缺失，存在时仍须匹配），不能静默遗漏宿主数据。
 
 本地实现完成，不代表已切换产品生产库。产品继续运行 SQLite。源服务、目标 API/Bot/worker 必须由操作员先停止，旧版程序不得在切换后重新启动；不要通过硬链接、另一份数据库副本或绕过适配器访问同一个部署。
