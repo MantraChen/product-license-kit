@@ -1,5 +1,9 @@
 # 异步仓储与 PostgreSQL
 
+核对日期：2026-11-19。本文描述已合入 main 的源码 0.7.0，不表示已创建版本标签、发布 npm 包或完成生产部署。SQLite 当前迁移为 8；PostgreSQL 使用独立迁移 1–6、共 41 表。当前能力与外部验收边界见 [演进计划](ROADMAP.md)。
+
+2026-11-19 集成复验：隔离 PostgreSQL 18.7 检查 109 项，默认回归 103 项。以下注明阶段的 19／37 等数量保留为历史证据；实际产品仍为 SQLite。
+
 2026-11-18 工作区已实现 `AsyncStore`、`PostgresStore` 和 `AsyncFramework`，使用 node-postgres 8.23.1 的真实异步连接池。异步账号、订单、权益、付款异常、设备、许可证、分发、审计、分页和事务通知业务已接入现有 HTTP 参考接口。原同步 `Framework` 保留 SQLite API；EXAMBIA 产品仍使用该实现，尚未迁移生产数据库。
 
 ## 异步业务入口

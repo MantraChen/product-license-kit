@@ -1,8 +1,12 @@
 # PostgreSQL 用户中心与独立管理端
 
+核对日期：2026-11-19。本文描述已合入 main 的源码 0.7.0，不表示已创建版本标签、发布 npm 包或完成生产部署。SQLite 当前迁移为 8；PostgreSQL 使用独立迁移 1–6、共 41 表。当前能力与外部验收边界见 [演进计划](ROADMAP.md)。
+
+门户与 Bot 已有本地实现，真实 KOOK OAuth 资格和目标部署仍未验收。普通门户换绑沿用核心自然月／额度规则；产品见证恢复是单独的宿主政策。
+
 `PostgresPortal` 与 `createPortalApp` 提供可复用的同源浏览器服务：OAuth 跳转、首次验证器设置、MFA／恢复码登录、用户权益与订单、明确换绑预览，以及具名权限的独立 `/admin` 页面。`examples/portal-server.mjs` 是完整启动入口。用户账号必须先通过可信邀请流程注册；不把首次访问者自动设为管理员，不接受请求中的“已验证身份”，不实现公开的 MFA 解除入口。
 
-这是通用框架的可选 PostgreSQL 适配层，要求与 `AsyncFramework` 共用同一个根仓储。同步 SQLite API 和 EXAMBIA 产品原有网页继续使用各自入口；没有把 EXAMBIA 的身份组、见证恢复或收款策略移入公共框架。当前新增迁移 5 的七张门户表，共 35 表；迁移 1–4 的 SQL／SHA256 保持不变。
+这是通用框架的可选 PostgreSQL 适配层，要求与 `AsyncFramework` 共用同一个根仓储。同步 SQLite API 和 EXAMBIA 产品原有网页继续使用各自入口；没有把 EXAMBIA 的身份组、见证恢复或收款策略移入公共框架。门户阶段迁移 5 增加七张表，当时共 35 表；当前 Bot 阶段已追加迁移 6，共 41 表，旧迁移摘要保持不变。
 
 ## 配置与启动
 
@@ -116,6 +120,6 @@ KOOK 回调配置为 `origin + /auth/callback`。只有真实平台开通 OAuth�
 
 算法依据：[RFC 6238](https://www.rfc-editor.org/rfc/rfc6238)、[RFC 4226](https://www.rfc-editor.org/rfc/rfc4226)。测试包含标准向量、真实 PostgreSQL 的并发／故障／备份恢复，以及实际浏览器的授权、MFA、保持登录、换绑和具名审计。
 
-门户阶段最终本地验证：框架与 vendor 各 87 项 PostgreSQL 检查、97 项默认回归通过；产品生产构建及 481 项测试通过。C# 30 项本地／76 项 PostgreSQL HTTP 检查、Rust 五项测试／77 项 HTTP 检查通过。两处 133 个框架文件哈希一致；新增迁移 5 后共 35 表，旧迁移 1–4 摘要不变。真实 OAuth、生产切换和通用 Bot 交互包仍需继续推进，主手册 Word 更新受渲染环境阻碍。
+门户阶段最终本地验证：框架与 vendor 各 87 项 PostgreSQL 检查、97 项默认回归通过；产品生产构建及 481 项测试通过。C# 30 项本地／76 项 PostgreSQL HTTP 检查、Rust 五项测试／77 项 HTTP 检查通过。两处 133 个框架文件哈希一致；新增迁移 5 后共 35 表，旧迁移 1–4 摘要不变。该阶段真实 OAuth、生产切换和通用 Bot 交互包尚未交付；随后 Bot 已实现，当前外部条件见 ROADMAP.md，综合手册随本次文档刷新更新。
 
 随后 Bot 阶段追加迁移 6，当前为 41 表，旧迁移 1–5 摘要不变。[Bot 交接](BOT.md#注册进入门户) 为 `/api/auth/start` 增加可选 `registration`，必须显式配置 `registrationAdmission`。仅接受此门户命名空间的一次性、指定 KOOK 身份、当前 epoch 的交接；授权后仍需 MFA，不能从旧原生注册接口旁路。参考启动入口的可选 kookBot 对象同时提供网页注册准入函数，缺省 Bot 执行与投递关闭。以上 87／97 是前一阶段的历史数量，不表示新增分支的验证已被自动涵盖。

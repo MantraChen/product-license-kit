@@ -1,5 +1,9 @@
 # PostgreSQL 多节点协调
 
+核对日期：2026-11-19。本文描述已合入 main 的源码 0.7.0，不表示已创建版本标签、发布 npm 包或完成生产部署。SQLite 当前迁移为 8；PostgreSQL 使用独立迁移 1–6、共 41 表。当前能力与外部验收边界见 [演进计划](ROADMAP.md)。
+
+两种任务适配器均已合入；跨主机使用 PostgreSQL，同机共享私有文件可用 SQLite 迁移 8。发送不明先核销，恢复备份先停发。以下阶段数量不代替 2026-11-19 集成验证。
+
 2026-11-18 工作区提供共享限流、持久任务队列及通知 worker。它们使用同一个 PostgreSQL schema 和数据库时钟；没有把产品 EXAMBIA 的 SQLite 部署切换为多节点。旧同步 Framework 的通知 dispatcher 仍按单 worker、至少一次投递使用。
 
 ## 共享 HTTP 限流

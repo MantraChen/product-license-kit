@@ -1,6 +1,6 @@
 # 适配器接入
 
-文档分工核对：2026-11-16。本页负责身份、付款、通知和文件适配；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#5-分发通知与迁移)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
+文档分工核对：2026-11-19。本页负责身份、付款、通知和文件适配；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#5-分发通知与迁移)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
 
 ## 0.7.0 商品与渠道接入
 
@@ -54,7 +54,7 @@ KOOK 适配器使用 Bearer access token 调用官方 `/api/v3/user/me`。设置
 
 实现 `NotificationSink.send(event, identity)` 后，通过受控 worker 调用 `framework.dispatchNotifications(sink)`。KOOK 示例使用 Bot token 调用官方私信 API；token 不写入源码。只在部署方明确启用 worker 时发送。
 
-首版 dispatcher 为单 worker、至少一次投递。失败事件保留并增加 attempts；未内置定时器、指数退避、死信管理或多 worker 锁。真实服务应按事件 ID 去重并设置退避，避免持续重试故障平台。通知只提醒用户查询受保护的用户中心，不携带可直接激活的永久秘密。
+同步 dispatcher 为单 worker、至少一次投递。失败事件保留并增加 attempts；此同步入口未内置定时器、指数退避、死信管理或多 worker 锁；AsyncFramework 的 PostgreSQL dispatcher 另有持久租约、退避和结果不明核销，见 [协调](COORDINATION.md)。真实服务应按事件 ID 去重并设置退避，避免持续重试故障平台。通知只提醒用户查询受保护的用户中心，不携带可直接激活的永久秘密。
 
 ## 用户文件
 
@@ -70,7 +70,7 @@ API 当前不接受文件上传、不执行用户命令、不生成下载 URL。
 
 ## 替换数据库
 
-SQLite 使用 WAL、外键和显式写事务，适合单节点。业务服务当前直接使用同步 SQLite 存储接口；PostgreSQL 接入需要引入异步仓储与迁移，保持事务、唯一约束和幂等语义，并运行并发集成测试。不要在网络共享目录放 SQLite，也不要假设多个服务副本的限流与 outbox 已协调。
+SQLite 使用 WAL、外键和显式写事务，适合单节点。同步业务服务继续使用 SQLite；PostgreSQL 已有 AsyncStore／PostgresStore／AsyncFramework，需显式创建异步入口，保持事务、唯一约束及幂等语义。已有共享契约和真实数据库并发验证，接入方式见 [PostgreSQL](POSTGRESQL.md)。不要在网络共享目录放 SQLite，也不要假设多个服务副本的限流与 outbox 已协调。
 ## 安全集成能力
 
 `FrameworkOptions.accountEnabled(accountId)` 可同步查询产品账号状态，必须显式返回 `true` 才允许；它会在核心授权、设备激活、订单与分发路径中校验，不能只在 HTTP 路由补一处检查。框架内置状态通过 `setAccountActive(id, active, reason)` 更新；停用会撤销会话、挑战与设备，恢复不会复活旧令牌，也不删除永久权益。产品的额外会话应在同一个 `store.transaction` 中撤销，嵌套核心事务由 savepoint 保证整体回滚。
@@ -84,3 +84,7 @@ SQLite 使用 WAL、外键和显式写事务，适合单节点。业务服务当
 需要通用浏览器界面时，可在共享 PostgreSQL 上另建 [门户服务](PORTAL.md)；不把部署管理 token 放入浏览器，也不自动采用 EXAMBIA 专属身份组规则。
 
 可选 [KOOK 私信 Bot](BOT.md) 在同一参考门户入口增加独立 Webhook 服务，购买、按钮归属验证、一次性注册及通知调度使用持久任务。三项执行／发送开关缺省关闭；注册由门户再次核实 OAuth 身份和当前准入，不将交接变成原生 invitation。正式 KOOK 应用配置、身份组、OAuth 资格及 Webhook／WebSocket 模式归属须由宿主确定。
+
+## 接入顺序与验收
+
+先固定审核提交，再选同步 SQLite 或异步 PostgreSQL；随后配置身份、目录、签名信任、任务调度与私有恢复材料。门户和 Bot 是可选适配层，不会自动更换产品现有入口。通用离线导入仅支持框架 SQLite v6/v7/v8，见 [迁移](SQLITE-POSTGRES.md)。真实 OAuth、消息、支付、文件格式和客户端信任过渡须各自验收；本地合成检查不能替代生产开通。

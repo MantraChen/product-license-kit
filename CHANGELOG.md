@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased main integrated 2026-11-19
+
+Package/source version remains 0.7.0; no tag or npm publication is implied. [PR #19](https://github.com/MantraChen/product-license-kit/pull/19) integrates the following implementation; this documentation refresh does not deploy it.
+
+- Add cursor pagination, OAuth code exchange and transaction-bound outbox resource references; SQLite migration 7 preserves unassociated legacy events.
+- Add AsyncFramework, real PostgreSQL storage and independent migrations 1–6 (41 tables), shared rate limits, leased jobs, uncertain-delivery review, signing plans and encrypted recovery.
+- Add reusable OAuth/MFA/operator portal and KOOK private-message interactions with identity-bound registration handoff; real platform qualification remains external.
+- Add Windows C# and Rust SDK sources, DPAPI interoperability and loopback HTTP checks; no native SDK package release or product TPM adapter is implied.
+- Add SQLite task leases in migration 8 and controlled SQLite v6/v7/v8 offline migration to PostgreSQL; do not import product/V5 data implicitly.
+- Refresh the complete documentation and synchronized Word guide. Local integrated checks: 103 default tests and 109 isolated PostgreSQL tests; hosted Windows/Ubuntu jobs did not start because of account billing lock.
+
+
 ## 0.7.0 — source version, 2026-11-12
 
 No release tag or npm publication is implied.

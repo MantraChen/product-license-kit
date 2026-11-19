@@ -221,7 +221,8 @@ def main():
     props.author = props.last_modified_by = 'MantraChen'
     props.identifier = digest
     props.comments = 'Generated from docs/SYSTEM-GUIDE.md; edit the source and regenerate.'
-    props.created = props.modified = datetime(2026, 10, 31, tzinfo=timezone.utc)
+    props.created = datetime(2026, 10, 31, tzinfo=timezone.utc)
+    props.modified = datetime(2026, 11, 19, tzinfo=timezone.utc)
     doc.save(OUTPUT)
     verify(blocks, digest)
 

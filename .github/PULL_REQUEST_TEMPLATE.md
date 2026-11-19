@@ -4,7 +4,7 @@ Describe the concrete problem and what changes for a user or integrator.
 
 ## Validation
 
-List relevant tests and compatibility considerations.
+List relevant tests and compatibility considerations. For documentation changes, check route/schema claims and links; regenerate and visually inspect the Word guide when its Markdown source changes. Record unstarted hosted jobs separately from passing local checks.
 
 ## Contribution authorization
 

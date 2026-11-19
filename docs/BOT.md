@@ -1,5 +1,9 @@
 # KOOK 私信交互适配器
 
+核对日期：2026-11-19。本文描述已合入 main 的源码 0.7.0，不表示已创建版本标签、发布 npm 包或完成生产部署。SQLite 当前迁移为 8；PostgreSQL 使用独立迁移 1–6、共 41 表。当前能力与外部验收边界见 [演进计划](ROADMAP.md)。
+
+真实 OAuth、手机私信及通知接收目标仍需目标配置；本地模拟消息不算实传。通用 Bot 不自动采用产品工单、见证恢复或个人收款码政策。
+
 面向框架宿主与维护者。2026-11-18 的未提交工作树实现 `PostgresKookBot`、`KookBotClient`、`KookWebhookDecoder`、`createKookBotApp`，需要 PostgreSQL 迁移 6，以及同一个 `AsyncFramework`／`PostgresPortal` 实例。它不替产品写入 KOOK 身份组、设备恢复政策或支付到账记录。
 
 ## 接收与验证

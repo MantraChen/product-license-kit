@@ -1,6 +1,6 @@
 # HTTP API v1
 
-文档分工核对：2026-11-16。本页负责HTTP 字段、认证与响应；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#1-角色输入与权限)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
+文档分工核对：2026-11-19。本页负责HTTP 字段、认证与响应；跨步骤状态与异常处理见 [详细契约](CONTRACTS.md#1-角色输入与权限)。适用于源码 0.7.0；历史迁移编号与发布事实按原日期保留。
 
 ## 0.7.0 商品兼容说明
 
@@ -77,9 +77,9 @@
 | `POST /v1/admin/distributions` | `{accountId,editionId,releaseId}`；需要幂等键；返回分发编号和可嵌入标记 |
 | `POST /v1/admin/distributions/:id/finalize` | `{sha256}`；登记最终文件哈希并取得签名清单，完成后不可修改 |
 | `GET /v1/admin/distributions/:id` | 文件归属和发放时身份快照 |
-| `GET /v1/admin/audit` | 最近 100 条审计记录 |
+| `GET /v1/admin/audit` | 无参数返回最近 100 条数组；limit/cursor 返回 `{items,nextCursor}`，上限 100 |
 
-管理 API 是受控后端集成接口。没有独立操作员账号、MFA 或完整可视化后台；当前审计管理员统一记为 `admin`。正式运营应在上层实现有具体身份的授权代理，不让多人共享根密钥。
+本页 /v1 管理 API 是受控后端集成接口，该入口不建立操作员账号或 MFA，核心审计管理员记为 `admin`。可选门户另提供具名权限与 MFA，并记录 portal.admin.* 审计。正式运营应在上层实现有具体身份的授权代理，不让多人共享根密钥。
 
 0.2.0 的 `importEntitlement`、`hasReleaseAccess` 和 `bestUpgradeOffer` 是受控宿主服务方法，没有新增用户自报证据的公开 HTTP 路由。用户 profile 的历史授权 `order_id` 可以为空，并返回按版本保存的 `channels`；消费者不能假设所有权益都来自订单。
 
@@ -111,4 +111,4 @@ createOrder 返回 expiresAt；orders 返回 expiresAt 与派生状态 expired�
 
 可选浏览器服务使用独立 `createPortalApp`，同源 Cookie、MFA 和具名权限不改变本页 `/v1` 原生协议。见 [门户接口](PORTAL.md#浏览器接口)。
 
-可选 `createKookBotApp` 仅提供独立 `GET /health` 与 `POST /webhook`，接收原始 KOOK 回调，不接受管理令牌或提交账号 ID 替代平台验证。[Bot 契约](BOT.md) 说明购买、私信按钮、一次性注册与发送结果核对。门户 `/api/auth/start` 可选 `registration` 仅接受此适配器签发的身份绑定交接，最终仍需 OAuth 和 MFA；原 `/v1/register` 不接受该交接令牌。
+可选 `createKookBotApp` 仅提供独立 `GET /health` 与 `POST /webhook`，接收原始 KOOK 回调，不接受管理令牌或提交账号 ID 替代平台验证。[Bot 契约](BOT.md) 说明购买、私信按钮、一次性注册与发送结果核对。门户 `/api/auth/start` 可选 `registration` 仅接受此适配器签发的身份绑定交接，最终仍需 OAuth 和 MFA；原 `/v1/auth/register` 不接受该交接令牌。
