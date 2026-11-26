@@ -12,8 +12,8 @@ importers:
         specifier: 11.1.5
         version: 11.1.5
       '@fastify/rate-limit':
-        specifier: 11.2.2
-        version: 11.2.2
+        specifier: 11.3.0
+        version: 11.3.0
       fastify:
         specifier: 5.12.8
         version: 5.12.8
@@ -66,8 +66,8 @@ packages:
   '@fastify/proxy-addr@5.1.2':
     resolution: {integrity: sha512-uqB4QsgVoro0XDC+DIftIMGXHdBPn+lK6Ek3xXAIxPMCJfqxnbtyEoMCm2KPUVOuIosd7Cyw9HawEqMFM/UA+g==}
 
-  '@fastify/rate-limit@11.2.2':
-    resolution: {integrity: sha512-Ynxk9BU82Y5Ux7NOk9NqyZpTMdFes8EY8quXrN6ePDsbtG4G9Afb3l9mD8Vw2nv0hXg0iFjV+gkdABReFPlShw==}
+  '@fastify/rate-limit@11.3.0':
+    resolution: {integrity: sha512-n+gmOdTRReRA+UGI/cPAvG4bW4FCDLofInXNkTX42/rkMPy/8ii8LsLWHUU1KC+jJRdBtOD9Zs+Js8168eS/4A==}
 
   '@lukeed/ms@2.0.2':
     resolution: {integrity: sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==}
@@ -560,7 +560,7 @@ snapshots:
       '@fastify/forwarded': 3.1.2
       ipaddr.js: 2.5.0
 
-  '@fastify/rate-limit@11.2.2':
+  '@fastify/rate-limit@11.3.0':
     dependencies:
       '@lukeed/ms': 2.0.2
       fastify-plugin: 6.0.1
